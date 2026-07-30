@@ -21,9 +21,9 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Tech globe with country borders — watch inbound and outbound connections light up by city.",
+          "NOC-grade globe: watch inbound and outbound traffic light up Earth in real time.",
       },
-      { name: "theme-color", content: "#ffffff" },
+      { name: "theme-color", content: "#03060c" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

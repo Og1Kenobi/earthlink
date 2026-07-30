@@ -26,7 +26,6 @@ function exteriorRings(g: GeoJsonGeometry): Ring[] {
   return [];
 }
 
-/** Lon/lat → equirectangular pixel. */
 function project(
   lon: number,
   lat: number,
@@ -38,9 +37,6 @@ function project(
   return [x, y];
 }
 
-/**
- * Draw a ring, splitting on antimeridian jumps so fill doesn't smear across the map.
- */
 function drawRing(
   ctx: CanvasRenderingContext2D,
   ring: Ring,
@@ -51,7 +47,6 @@ function drawRing(
   const open = openRing(ring);
   if (open.length < 3) return;
 
-  // Split into runs that don't jump the date line
   const runs: Ring[] = [];
   let cur: Ring = [open[0]!];
   for (let i = 1; i < open.length; i++) {
@@ -89,17 +84,30 @@ function paintFeatures(
   fc: GeoJsonFeatureCollection,
   w: number,
   h: number,
-  opts: { fill: boolean; stroke: boolean; strokeStyle?: string; lineWidth?: number },
+  opts: {
+    fill: boolean;
+    stroke: boolean;
+    strokeStyle?: string;
+    lineWidth?: number;
+    alpha?: number;
+  },
 ) {
   fc.features.forEach((f: GeoJsonFeature, fi: number) => {
     const g = f.geometry;
     if (!g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) return;
     const id = featureName(f, `f-${fi}`);
     if (opts.fill) {
-      ctx.fillStyle = `#${colorFromId(`${id}#${fi}`).getHexString()}`;
+      const c = colorFromId(`${id}#${fi}`);
+      // Darker, richer political fills for NOC look
+      const hsl = { h: 0, s: 0, l: 0 };
+      c.getHSL(hsl);
+      c.setHSL(hsl.h, Math.min(0.72, hsl.s * 1.05), Math.min(0.42, hsl.l * 0.72));
+      ctx.globalAlpha = opts.alpha ?? 0.92;
+      ctx.fillStyle = `#${c.getHexString()}`;
     }
     if (opts.stroke) {
-      ctx.strokeStyle = opts.strokeStyle ?? "#0f172a";
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = opts.strokeStyle ?? "rgba(226,232,240,0.35)";
       ctx.lineWidth = opts.lineWidth ?? 1;
     }
     for (const ring of exteriorRings(g)) {
@@ -107,12 +115,10 @@ function paintFeatures(
       if (opts.stroke) drawRing(ctx, ring, w, h, "stroke");
     }
   });
+  ctx.globalAlpha = 1;
 }
 
-/**
- * Build an equirectangular political texture:
- * ocean + randomly colored countries + randomly colored states + borders.
- */
+/** Equirectangular political texture — deep ocean, neon-edge borders. */
 export function buildPoliticalTexture(
   countries: GeoJsonFeatureCollection,
   states: GeoJsonFeatureCollection | null,
@@ -125,12 +131,16 @@ export function buildPoliticalTexture(
   canvas.height = h;
   const ctx = canvas.getContext("2d")!;
 
-  // Ocean
-  ctx.fillStyle = "#2f6fad";
+  // Deep navy ocean
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, "#07101f");
+  grad.addColorStop(0.5, "#0a1628");
+  grad.addColorStop(1, "#050b14");
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
 
-  // Subtle lat/lon grid
-  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  // Soft lat/lon grid
+  ctx.strokeStyle = "rgba(94,234,212,0.06)";
   ctx.lineWidth = 1;
   for (let lat = -60; lat <= 60; lat += 30) {
     const y = ((90 - lat) / 180) * h;
@@ -147,28 +157,23 @@ export function buildPoliticalTexture(
     ctx.stroke();
   }
 
-  // Countries — random fills
-  paintFeatures(ctx, countries, w, h, { fill: true, stroke: false });
-
-  // States/provinces on top (also random, distinct per region)
+  paintFeatures(ctx, countries, w, h, { fill: true, stroke: false, alpha: 0.88 });
   if (states) {
-    paintFeatures(ctx, states, w, h, { fill: true, stroke: false });
+    paintFeatures(ctx, states, w, h, { fill: true, stroke: false, alpha: 0.55 });
   }
-
-  // Borders: states thin, countries thicker
   if (states) {
     paintFeatures(ctx, states, w, h, {
       fill: false,
       stroke: true,
-      strokeStyle: "rgba(15,23,42,0.45)",
-      lineWidth: 0.8,
+      strokeStyle: "rgba(148,163,184,0.28)",
+      lineWidth: 0.7,
     });
   }
   paintFeatures(ctx, countries, w, h, {
     fill: false,
     stroke: true,
-    strokeStyle: "rgba(15,23,42,0.85)",
-    lineWidth: 1.4,
+    strokeStyle: "rgba(165,243,252,0.45)",
+    lineWidth: 1.2,
   });
 
   const tex = new THREE.CanvasTexture(canvas);

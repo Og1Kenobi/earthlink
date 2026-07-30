@@ -8,6 +8,7 @@ import {
 } from "./locations";
 import { haversineKm } from "./geo";
 import type { HomeSource } from "./home-location";
+import { playConnectionBlip, setFxAudioEnabled } from "./fx-audio";
 
 export type TrafficDirection = "inbound" | "outbound";
 
@@ -27,6 +28,19 @@ export type Connection = {
   real?: boolean;
   live?: boolean;
   direction?: TrafficDirection;
+  /** Burst flash for globe impact rings */
+  impactAt?: number;
+};
+
+export type TrafficEvent = {
+  id: string;
+  at: number;
+  text: string;
+  direction: TrafficDirection;
+  protocol: string;
+  city: string;
+  country: string;
+  ip: string;
 };
 
 export type Home = {
@@ -69,6 +83,11 @@ type State = {
   agentActiveCount: number;
   inboundCount: number;
   outboundCount: number;
+  events: TrafficEvent[];
+  selectedId: string | null;
+  soundEnabled: boolean;
+  /** Rolling samples of active count for sparkline */
+  activityHistory: number[];
   setHome: (home: Partial<Home> & { lat: number; lon: number }) => void;
   setHomeReady: (ready: boolean) => void;
   setPaused: (paused: boolean) => void;
@@ -77,6 +96,9 @@ type State = {
   setAgentError: (error: string | null) => void;
   setAgentActiveCount: (n: number) => void;
   setDirectionCounts: (inb: number, out: number) => void;
+  setSelectedId: (id: string | null) => void;
+  setSoundEnabled: (on: boolean) => void;
+  pushActivitySample: (n: number) => void;
   spawnConnection: (
     override?: Partial<City> & { direction?: TrafficDirection },
   ) => void;
@@ -92,6 +114,18 @@ function ttlForIntensity(intensity: State["intensity"]): number {
   if (intensity === "calm") return 14000 + Math.random() * 8000;
   if (intensity === "busy") return 7000 + Math.random() * 5000;
   return 10000 + Math.random() * 7000;
+}
+
+function eventText(c: {
+  direction?: TrafficDirection;
+  protocol: string;
+  city: string;
+  country: string;
+  ip: string;
+  port: number;
+}): string {
+  const dir = c.direction === "inbound" ? "IN" : "OUT";
+  return `${dir} ${c.protocol} · ${c.city}, ${c.country} · ${c.ip}${c.port ? `:${c.port}` : ""}`;
 }
 
 export const useConnectionStore = create<State>((set, get) => ({
@@ -111,6 +145,10 @@ export const useConnectionStore = create<State>((set, get) => ({
   agentActiveCount: 0,
   inboundCount: 0,
   outboundCount: 0,
+  events: [],
+  selectedId: null,
+  soundEnabled: true,
+  activityHistory: Array.from({ length: 32 }, () => 0),
 
   setHome: (home) =>
     set((s) => ({
@@ -131,9 +169,18 @@ export const useConnectionStore = create<State>((set, get) => ({
   setAgentActiveCount: (agentActiveCount) => set({ agentActiveCount }),
   setDirectionCounts: (inboundCount, outboundCount) =>
     set({ inboundCount, outboundCount }),
+  setSelectedId: (selectedId) => set({ selectedId }),
+  setSoundEnabled: (soundEnabled) => {
+    setFxAudioEnabled(soundEnabled);
+    set({ soundEnabled });
+  },
+  pushActivitySample: (n) =>
+    set((s) => ({
+      activityHistory: [...s.activityHistory.slice(-31), n],
+    })),
 
   spawnConnection: (override) => {
-    const { home, intensity, mode } = get();
+    const { home, intensity, mode, soundEnabled } = get();
     if (mode === "real") return;
     const city = override
       ? {
@@ -152,6 +199,7 @@ export const useConnectionStore = create<State>((set, get) => ({
     const { protocol, port } = randomProtocol();
     const direction: TrafficDirection =
       override?.direction ?? (Math.random() < 0.45 ? "inbound" : "outbound");
+    const now = performance.now();
     const conn: Connection = {
       id: `c-${++idSeq}-${Date.now()}`,
       ip: fakeIp(),
@@ -162,7 +210,7 @@ export const useConnectionStore = create<State>((set, get) => ({
       protocol,
       port,
       bytes: Math.floor(Math.random() * 900_000) + 1200,
-      createdAt: performance.now(),
+      createdAt: now,
       ttl: ttlForIntensity(intensity),
       distanceKm: Math.round(
         haversineKm(city.lat, city.lon, home.lat, home.lon),
@@ -170,25 +218,40 @@ export const useConnectionStore = create<State>((set, get) => ({
       real: false,
       live: true,
       direction,
+      impactAt: now,
     };
+
+    if (soundEnabled) playConnectionBlip(direction, protocol);
 
     set((s) => {
       const connections = [conn, ...s.connections].slice(0, 80);
       const live = connections.filter((c) => c.live !== false);
+      const ev: TrafficEvent = {
+        id: conn.id,
+        at: now,
+        text: eventText(conn),
+        direction,
+        protocol,
+        city: conn.city,
+        country: conn.country,
+        ip: conn.ip,
+      };
       return {
         connections,
         totalSeen: s.totalSeen + 1,
         inboundCount: live.filter((c) => c.direction === "inbound").length,
         outboundCount: live.filter((c) => c.direction !== "inbound").length,
+        events: [ev, ...s.events].slice(0, 40),
       };
     });
   },
 
   upsertRealConnections: (rows) => {
-    const { home } = get();
+    const { home, soundEnabled } = get();
     const now = performance.now();
     const linger = 4500;
     let newCount = 0;
+    const freshEvents: TrafficEvent[] = [];
 
     set((s) => {
       const byId = new Map(s.connections.map((c) => [c.id, c]));
@@ -213,10 +276,12 @@ export const useConnectionStore = create<State>((set, get) => ({
               : now - prev.createdAt + (row.lingerMs ?? linger),
           });
         } else {
-          if (!seenRealIds.has(row.id)) {
+          const isNew = !seenRealIds.has(row.id);
+          if (isNew) {
             seenRealIds.add(row.id);
             newCount += 1;
           }
+          const direction = row.direction ?? "outbound";
           byId.set(row.id, {
             id: row.id,
             ip: row.ip,
@@ -234,8 +299,29 @@ export const useConnectionStore = create<State>((set, get) => ({
             ),
             real: true,
             live: row.live,
-            direction: row.direction ?? "outbound",
+            direction,
+            impactAt: isNew ? now : undefined,
           });
+          if (isNew) {
+            if (soundEnabled) playConnectionBlip(direction, row.protocol);
+            freshEvents.push({
+              id: row.id,
+              at: now,
+              text: eventText({
+                direction,
+                protocol: row.protocol,
+                city: row.city,
+                country: row.country,
+                ip: row.ip,
+                port: row.port,
+              }),
+              direction,
+              protocol: row.protocol,
+              city: row.city,
+              country: row.country,
+              ip: row.ip,
+            });
+          }
         }
       }
 
@@ -251,6 +337,7 @@ export const useConnectionStore = create<State>((set, get) => ({
       });
 
       const live = merged.filter((c) => c.live !== false);
+      const history = [...s.activityHistory.slice(-31), live.length];
       return {
         connections: merged.slice(0, 100),
         totalSeen: s.totalSeen + newCount,
@@ -258,6 +345,9 @@ export const useConnectionStore = create<State>((set, get) => ({
         agentError: null,
         inboundCount: live.filter((c) => c.direction === "inbound").length,
         outboundCount: live.filter((c) => c.direction !== "inbound").length,
+        events: [...freshEvents, ...s.events].slice(0, 40),
+        activityHistory: history,
+        agentActiveCount: live.length,
       };
     });
   },
@@ -276,7 +366,14 @@ export const useConnectionStore = create<State>((set, get) => ({
   },
 
   clear: () =>
-    set({ connections: [], totalSeen: 0, inboundCount: 0, outboundCount: 0 }),
+    set({
+      connections: [],
+      totalSeen: 0,
+      inboundCount: 0,
+      outboundCount: 0,
+      events: [],
+      selectedId: null,
+    }),
 }));
 
 export function connectionLife(c: Connection, now: number): number {
@@ -289,4 +386,14 @@ export function connectionLife(c: Connection, now: number): number {
   if (t < 0.08) return t / 0.08;
   if (t > 0.72) return Math.max(0, 1 - (t - 0.72) / 0.28);
   return 1;
+}
+
+/** Weight for arc thickness by protocol drama. */
+export function protocolWeight(protocol: string): number {
+  const p = (protocol || "").toUpperCase();
+  if (p.includes("SSH") || p.includes("RDP")) return 1.35;
+  if (p.includes("DNS") || p.includes("PING") || p.includes("ICMP")) return 0.75;
+  if (p.includes("HTTPS") || p.includes("HTTP")) return 1.1;
+  if (p.includes("QUIC")) return 1.0;
+  return 0.95;
 }

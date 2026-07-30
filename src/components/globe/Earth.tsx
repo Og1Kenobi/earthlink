@@ -20,7 +20,6 @@ const STATES_URL =
 
 function PoliticalGlobe({ children }: { children?: ReactNode }) {
   const [map, setMap] = useState<THREE.CanvasTexture | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,7 +42,6 @@ function PoliticalGlobe({ children }: { children?: ReactNode }) {
         setMap(tex);
       } catch (e) {
         console.warn("[earthlink] political map:", e);
-        if (!cancelled) setError(String(e));
       }
     })();
 
@@ -56,17 +54,17 @@ function PoliticalGlobe({ children }: { children?: ReactNode }) {
   const mat = useMemo(() => {
     if (!map) {
       return new THREE.MeshPhongMaterial({
-        color: new THREE.Color("#3b82c4"),
-        emissive: new THREE.Color("#1e4d7b"),
-        emissiveIntensity: 0.2,
+        color: new THREE.Color("#0a1628"),
+        emissive: new THREE.Color("#04101c"),
+        emissiveIntensity: 0.4,
       });
     }
     return new THREE.MeshPhongMaterial({
       map,
-      specular: new THREE.Color("#ffffff"),
-      shininess: 8,
-      emissive: new THREE.Color("#111827"),
-      emissiveIntensity: 0.08,
+      specular: new THREE.Color("#1e3a5f"),
+      shininess: 14,
+      emissive: new THREE.Color("#0b1220"),
+      emissiveIntensity: 0.35,
     });
   }, [map]);
 
@@ -81,19 +79,43 @@ function PoliticalGlobe({ children }: { children?: ReactNode }) {
       <mesh material={mat}>
         <sphereGeometry args={[EARTH_RADIUS, 96, 96]} />
       </mesh>
-      {/* faint tech wire overlay */}
-      <mesh scale={1.003}>
-        <sphereGeometry args={[EARTH_RADIUS, 32, 32]} />
+      {/* Neon rim atmosphere */}
+      <mesh scale={1.018}>
+        <sphereGeometry args={[EARTH_RADIUS, 64, 64]} />
         <meshBasicMaterial
-          color="#0f172a"
+          color="#22d3ee"
+          transparent
+          opacity={0.07}
+          side={THREE.BackSide}
+          depthWrite={false}
+          toneMapped={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+      <mesh scale={1.045}>
+        <sphereGeometry args={[EARTH_RADIUS, 48, 48]} />
+        <meshBasicMaterial
+          color="#0ea5e9"
+          transparent
+          opacity={0.09}
+          side={THREE.BackSide}
+          depthWrite={false}
+          toneMapped={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+      {/* Faint tech wire */}
+      <mesh scale={1.004}>
+        <sphereGeometry args={[EARTH_RADIUS, 36, 36]} />
+        <meshBasicMaterial
+          color="#67e8f9"
           wireframe
           transparent
-          opacity={0.04}
+          opacity={0.035}
           depthWrite={false}
           toneMapped={false}
         />
       </mesh>
-      {error ? null : null}
       {children}
     </group>
   );
@@ -117,7 +139,7 @@ export function Earth({
 
   useFrame((_, delta) => {
     if (!autoRotate || !group.current) return;
-    group.current.rotation.y += Math.min(delta, 0.05) * 0.03;
+    group.current.rotation.y += Math.min(delta, 0.05) * 0.028;
   });
 
   return (

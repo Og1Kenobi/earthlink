@@ -12,13 +12,17 @@ import {
   Radio,
   Server,
   Trash2,
+  Volume2,
+  VolumeX,
   Zap,
+  X,
 } from "lucide-react";
 import {
   useConnectionStore,
   type Connection,
 } from "@/lib/connection-store";
 import { refreshHomeLocation } from "@/components/HomeLocator";
+import { resumeFxAudio } from "@/lib/fx-audio";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -50,7 +54,6 @@ function sourceBlurb(source: string, accuracyM?: number): string {
   }
 }
 
-/** Built-in filters + dynamic protocol keys as `proto:DNS` etc. */
 type ConnFilter =
   | "all"
   | "live"
@@ -96,6 +99,31 @@ function matchesFilter(c: Connection, filter: ConnFilter): boolean {
   return true;
 }
 
+function ActivitySpark({ samples }: { samples: number[] }) {
+  const max = Math.max(1, ...samples);
+  return (
+    <div
+      className="flex h-8 items-end gap-px"
+      aria-hidden
+      title="Live activity"
+    >
+      {samples.map((v, i) => {
+        const h = Math.max(8, Math.round((v / max) * 100));
+        const hot = i > samples.length - 4;
+        return (
+          <div
+            key={i}
+            className={`spark-bar w-1 rounded-sm ${
+              hot ? "bg-primary/80" : "bg-accent/35"
+            }`}
+            style={{ height: `${h}%` }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 export function Hud() {
   const home = useConnectionStore((s) => s.home);
   const homeReady = useConnectionStore((s) => s.homeReady);
@@ -108,12 +136,18 @@ export function Hud() {
   const agentActiveCount = useConnectionStore((s) => s.agentActiveCount);
   const inboundCount = useConnectionStore((s) => s.inboundCount);
   const outboundCount = useConnectionStore((s) => s.outboundCount);
+  const events = useConnectionStore((s) => s.events);
+  const selectedId = useConnectionStore((s) => s.selectedId);
+  const soundEnabled = useConnectionStore((s) => s.soundEnabled);
+  const activityHistory = useConnectionStore((s) => s.activityHistory);
   const setPaused = useConnectionStore((s) => s.setPaused);
   const setIntensity = useConnectionStore((s) => s.setIntensity);
   const setMode = useConnectionStore((s) => s.setMode);
   const spawnConnection = useConnectionStore((s) => s.spawnConnection);
   const clear = useConnectionStore((s) => s.clear);
   const setHome = useConnectionStore((s) => s.setHome);
+  const setSelectedId = useConnectionStore((s) => s.setSelectedId);
+  const setSoundEnabled = useConnectionStore((s) => s.setSoundEnabled);
 
   const [now, setNow] = useState(() => performance.now());
   const [locating, setLocating] = useState(false);
@@ -125,6 +159,7 @@ export function Hud() {
   }, []);
 
   const activeCount = connections.filter((c) => c.live !== false).length;
+
   const topCountries = useMemo(() => {
     const map = new Map<string, number>();
     for (const c of connections) {
@@ -133,10 +168,21 @@ export function Hud() {
     }
     return [...map.entries()]
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 4);
+      .slice(0, 5);
   }, [connections]);
 
-  /** Protocols currently in the list → extra dropdown options */
+  const topProtocols = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of connections) {
+      if (c.live === false) continue;
+      const p = c.protocol || "TCP";
+      map.set(p, (map.get(p) ?? 0) + 1);
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+  }, [connections]);
+
   const filterOptions = useMemo(() => {
     const seen = new Set(STATIC_FILTERS.map((f) => f.value));
     const opts = [...STATIC_FILTERS];
@@ -146,21 +192,20 @@ export function Hud() {
       if (!p) continue;
       protos.set(p, (protos.get(p) ?? 0) + 1);
     }
-    const extra = [...protos.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .slice(0, 16);
-    for (const [p, n] of extra) {
+    for (const [p, n] of [...protos.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)) {
       const value = `proto:${p}` as ConnFilter;
-      if (seen.has(value) || seen.has(`proto:${p.toUpperCase()}`)) continue;
-      // skip if already covered by static (case-insensitive)
       const upper = p.toUpperCase();
       if (
         STATIC_FILTERS.some(
-          (f) => f.value === `proto:${upper}` || f.label.toUpperCase() === upper,
+          (f) =>
+            f.value === `proto:${upper}` || f.label.toUpperCase() === upper,
         )
       ) {
         continue;
       }
+      if (seen.has(value)) continue;
       seen.add(value);
       opts.push({ value, label: `${p} (${n})` });
     }
@@ -170,6 +215,11 @@ export function Hud() {
   const filteredConnections = useMemo(
     () => connections.filter((c) => matchesFilter(c, connFilter)),
     [connections, connFilter],
+  );
+
+  const selected = useMemo(
+    () => connections.find((c) => c.id === selectedId) ?? null,
+    [connections, selectedId],
   );
 
   const onRelocate = async () => {
@@ -182,68 +232,92 @@ export function Hud() {
   };
 
   const modeLabel =
-    mode === "real" ? "REAL" : mode === "connecting" ? "LINK…" : "DEMO";
+    mode === "real" ? "LIVE" : mode === "connecting" ? "LINK…" : "DEMO";
   const modeClass =
     mode === "real"
-      ? "border-accent/40 bg-accent/10 text-accent"
+      ? "border-primary/40 bg-primary/10 text-primary"
       : mode === "connecting"
         ? "border-warn/40 bg-warn/10 text-warn"
         : "border-border bg-surface-elevated text-muted";
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-3 sm:p-5">
-      <header className="pointer-events-auto flex flex-wrap items-start justify-between gap-3">
-        <div className="panel-glass max-w-md rounded-xl px-4 py-3 sm:px-5">
+      {/* Cinematic overlays */}
+      <div className="vignette absolute inset-0" />
+      <div className="scanlines absolute inset-0" />
+
+      <header className="pointer-events-auto relative flex flex-wrap items-start justify-between gap-3">
+        <div className="panel-glass panel-glow-in max-w-md rounded-xl px-4 py-3 sm:px-5">
           <div className="flex flex-wrap items-center gap-2">
             <Globe2 className="size-5 text-primary" strokeWidth={1.75} />
             <h1 className="text-base font-semibold tracking-tight text-fg sm:text-lg">
               Earthlink
             </h1>
             <span
-              className={`rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${modeClass}`}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${modeClass}`}
             >
+              {mode === "real" && (
+                <span className="pulse-dot size-1.5 rounded-full bg-primary" />
+              )}
               {modeLabel}
             </span>
           </div>
           <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted sm:text-sm">
             {mode === "real"
-              ? "Tech map · TCP, UDP/DNS, ping · green in, amber out."
+              ? "NOC globe · TCP · UDP/DNS · ping · click a row to focus the arc."
               : mode === "connecting"
-                ? "Connecting to the traffic agent on this server…"
-                : "Demo traffic (agent offline). Install on your server for real sockets."}
+                ? "Linking traffic agent…"
+                : "Demo mode — install on your server for real sockets."}
           </p>
-          <div className="mt-2 flex flex-wrap gap-3 text-[10px] font-mono uppercase tracking-wide">
-            <span className="inline-flex items-center gap-1 text-primary">
-              <span className="size-1.5 rounded-full bg-primary" />
-              Inbound
-            </span>
-            <span className="inline-flex items-center gap-1 text-warn">
-              <span className="size-1.5 rounded-full bg-warn" />
-              Outbound
-            </span>
+          <div className="mt-2 flex flex-wrap items-center gap-4">
+            <div className="flex gap-3 text-[10px] font-mono uppercase tracking-wide">
+              <span className="inline-flex items-center gap-1 text-primary">
+                <span className="size-1.5 rounded-full bg-primary shadow-[0_0_8px_var(--color-primary)]" />
+                In
+              </span>
+              <span className="inline-flex items-center gap-1 text-warn">
+                <span className="size-1.5 rounded-full bg-warn shadow-[0_0_8px_var(--color-warn)]" />
+                Out
+              </span>
+            </div>
+            <ActivitySpark samples={activityHistory} />
           </div>
         </div>
 
         <div className="panel-glass flex flex-wrap items-center gap-2 rounded-xl px-3 py-2">
           <button
             type="button"
+            onClick={() => {
+              resumeFxAudio();
+              setSoundEnabled(!soundEnabled);
+            }}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 text-sm text-fg transition hover:border-accent/40 hover:text-accent"
+            aria-label={soundEnabled ? "Mute" : "Unmute"}
+            title={soundEnabled ? "Mute blips" : "Enable blips"}
+          >
+            {soundEnabled ? (
+              <Volume2 className="size-4" />
+            ) : (
+              <VolumeX className="size-4" />
+            )}
+          </button>
+          <button
+            type="button"
             onClick={() => setPaused(!paused)}
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 text-sm text-fg transition hover:border-primary/40 hover:text-primary"
             aria-label={paused ? "Resume" : "Pause"}
             disabled={mode === "real"}
-            title={mode === "real" ? "Live sockets can’t be paused" : undefined}
           >
-            {paused ? (
-              <Play className="size-4" />
-            ) : (
-              <Pause className="size-4" />
-            )}
+            {paused ? <Play className="size-4" /> : <Pause className="size-4" />}
             <span className="hidden sm:inline">{paused ? "Resume" : "Pause"}</span>
           </button>
           {mode !== "real" && (
             <button
               type="button"
-              onClick={() => spawnConnection()}
+              onClick={() => {
+                resumeFxAudio();
+                spawnConnection();
+              }}
               className="inline-flex h-10 items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 text-sm text-primary transition hover:bg-primary/20"
             >
               <Zap className="size-4" />
@@ -260,7 +334,7 @@ export function Hud() {
               className="inline-flex h-10 items-center gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 text-sm text-accent transition hover:bg-accent/20"
             >
               <Server className="size-4" />
-              <span className="hidden sm:inline">Retry agent</span>
+              <span className="hidden sm:inline">Retry</span>
             </button>
           )}
           <button
@@ -274,7 +348,7 @@ export function Hud() {
         </div>
       </header>
 
-      <div className="pointer-events-none flex flex-1 items-stretch justify-between gap-3 py-3">
+      <div className="pointer-events-none relative flex flex-1 items-stretch justify-between gap-3 py-3">
         <aside className="pointer-events-auto flex w-[min(100%,16.5rem)] flex-col gap-3 self-end sm:self-center">
           <div className="panel-glass rounded-xl p-3 sm:p-4">
             <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-faint">
@@ -292,16 +366,16 @@ export function Hud() {
               <Stat label="Seen" value={String(totalSeen)} />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-primary/20 bg-primary/5 px-2 py-1.5">
+              <div className="rounded-lg border border-primary/25 bg-primary/10 px-2 py-1.5">
                 <p className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-primary">
                   <ArrowDownLeft className="size-3" />
                   In
                 </p>
-                <p className="font-mono text-lg font-semibold tabular-nums text-primary">
+                <p className="font-mono text-lg font-semibold tabular-nums text-primary text-glow">
                   {inboundCount}
                 </p>
               </div>
-              <div className="rounded-lg border border-warn/20 bg-warn/5 px-2 py-1.5">
+              <div className="rounded-lg border border-warn/25 bg-warn/10 px-2 py-1.5">
                 <p className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-warn">
                   <ArrowUpRight className="size-3" />
                   Out
@@ -337,7 +411,7 @@ export function Hud() {
             {topCountries.length > 0 && (
               <div className="mt-3 border-t border-border pt-3">
                 <p className="text-[10px] uppercase tracking-wider text-faint">
-                  Active peers
+                  Hot countries
                 </p>
                 <ul className="mt-1.5 space-y-1">
                   {topCountries.map(([cc, n]) => (
@@ -347,6 +421,24 @@ export function Hud() {
                     >
                       <span className="text-fg">{cc}</span>
                       <span className="text-primary">{n}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {topProtocols.length > 0 && (
+              <div className="mt-3 border-t border-border pt-3">
+                <p className="text-[10px] uppercase tracking-wider text-faint">
+                  Protocols
+                </p>
+                <ul className="mt-1.5 space-y-1">
+                  {topProtocols.map(([p, n]) => (
+                    <li
+                      key={p}
+                      className="flex items-center justify-between font-mono text-xs text-muted"
+                    >
+                      <span className="truncate text-fg">{p}</span>
+                      <span className="text-accent">{n}</span>
                     </li>
                   ))}
                 </ul>
@@ -370,11 +462,6 @@ export function Hud() {
                 onClick={onRelocate}
                 disabled={locating || mode === "real"}
                 className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface-elevated px-2 text-[11px] text-muted transition hover:border-accent/40 hover:text-accent disabled:opacity-50"
-                title={
-                  mode === "real"
-                    ? "Home is this server’s location"
-                    : "Re-detect your location"
-                }
               >
                 <Crosshair
                   className={`size-3.5 ${locating ? "animate-spin" : ""}`}
@@ -395,14 +482,45 @@ export function Hud() {
             )}
             <p className="mt-2 text-[11px] leading-snug text-faint">
               {mode === "real"
-                ? "Server pin — all arcs meet here"
+                ? "Beacon — all arcs converge here"
                 : sourceBlurb(home.source, home.accuracyM)}
             </p>
           </div>
+
+          {selected && (
+            <div className="panel-glass panel-glow-in event-flash rounded-xl p-3 sm:p-4">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-faint">
+                  Focus
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(null)}
+                  className="rounded-md p-1 text-muted hover:text-fg"
+                  aria-label="Close"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+              <p className="mt-1 text-sm font-semibold text-fg">
+                {selected.city}, {selected.country}
+              </p>
+              <p className="mt-0.5 font-mono text-[11px] text-accent">
+                {selected.protocol} ·{" "}
+                {selected.direction === "inbound" ? "inbound" : "outbound"}
+              </p>
+              <p className="mt-1 font-mono text-[11px] text-muted">
+                {selected.ip}:{selected.port}
+              </p>
+              <p className="mt-1 text-[11px] text-faint">
+                {selected.distanceKm.toLocaleString()} km from home
+              </p>
+            </div>
+          )}
         </aside>
 
         <aside className="pointer-events-auto hidden w-[min(100%,18rem)] flex-col self-stretch md:flex">
-          <div className="panel-glass flex h-full min-h-0 max-h-[min(82vh,46rem)] flex-1 flex-col rounded-xl">
+          <div className="panel-glass flex h-full min-h-0 max-h-[min(78vh,44rem)] flex-1 flex-col rounded-xl">
             <div className="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-3 sm:px-4">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-faint">
@@ -437,16 +555,16 @@ export function Hud() {
               {connections.length === 0 ? (
                 <li className="px-2 py-6 text-center text-xs text-muted">
                   {mode === "real"
-                    ? "No public remote sockets right now — waiting…"
+                    ? "Waiting for public remotes…"
                     : "Waiting for traffic…"}
                 </li>
               ) : filteredConnections.length === 0 ? (
                 <li className="px-2 py-6 text-center text-xs text-muted">
-                  No connections match this filter.
+                  No matches.
                   <button
                     type="button"
                     onClick={() => setConnFilter("all")}
-                    className="mt-2 block w-full text-[11px] text-primary underline-offset-2 hover:underline"
+                    className="mt-2 block w-full text-[11px] text-primary hover:underline"
                   >
                     Show all
                   </button>
@@ -456,57 +574,54 @@ export function Hud() {
                   const age = now - c.createdAt;
                   const remaining = Math.max(0, c.ttl - age);
                   const inbound = c.direction === "inbound";
+                  const isSel = c.id === selectedId;
                   return (
-                    <li
-                      key={c.id}
-                      className="rounded-lg px-2.5 py-2 transition hover:bg-surface/80"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-fg">
-                            <span
-                              className={`mr-1.5 inline-flex items-center gap-0.5 rounded px-1 py-0.5 font-mono text-[9px] uppercase ${
-                                inbound
-                                  ? "bg-primary/15 text-primary"
-                                  : "bg-warn/15 text-warn"
-                              }`}
-                            >
-                              {inbound ? (
-                                <ArrowDownLeft className="size-2.5" />
-                              ) : (
-                                <ArrowUpRight className="size-2.5" />
-                              )}
-                              {inbound ? "in" : "out"}
-                            </span>
-                            {c.city}
-                            <span className="ml-1 font-normal text-muted">
-                              {c.country}
-                            </span>
-                          </p>
-                          <p className="font-mono text-[11px] text-faint">
-                            {c.ip}:{c.port} · {c.protocol}
-                          </p>
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          resumeFxAudio();
+                          setSelectedId(isSel ? null : c.id);
+                        }}
+                        className={`w-full rounded-lg px-2.5 py-2 text-left transition hover:bg-surface-elevated/80 ${
+                          isSel ? "conn-row-selected" : ""
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-fg">
+                              <span
+                                className={`mr-1.5 inline-flex items-center gap-0.5 rounded px-1 py-0.5 font-mono text-[9px] uppercase ${
+                                  inbound
+                                    ? "bg-primary/15 text-primary"
+                                    : "bg-warn/15 text-warn"
+                                }`}
+                              >
+                                {inbound ? (
+                                  <ArrowDownLeft className="size-2.5" />
+                                ) : (
+                                  <ArrowUpRight className="size-2.5" />
+                                )}
+                                {inbound ? "in" : "out"}
+                              </span>
+                              {c.city}
+                              <span className="ml-1 font-normal text-muted">
+                                {c.country}
+                              </span>
+                            </p>
+                            <p className="font-mono text-[11px] text-faint">
+                              {c.ip}:{c.port} · {c.protocol}
+                            </p>
+                          </div>
+                          <span className="shrink-0 font-mono text-[10px] text-primary">
+                            {c.real && c.live ? "●" : formatAge(remaining)}
+                          </span>
                         </div>
-                        <span className="shrink-0 font-mono text-[10px] text-primary">
-                          {c.real && c.live ? "●" : formatAge(remaining)}
-                        </span>
-                      </div>
-                      <div className="mt-1 flex items-center justify-between text-[10px] text-muted">
-                        <span>{c.distanceKm.toLocaleString()} km</span>
-                        {!c.real && <span>{formatBytes(c.bytes)}</span>}
-                      </div>
-                      {!(c.real && c.live) && (
-                        <div className="mt-1.5 h-0.5 overflow-hidden rounded-full bg-border">
-                          <div
-                            className={`h-full rounded-full transition-[width] duration-200 ${
-                              inbound ? "bg-primary/70" : "bg-warn/70"
-                            }`}
-                            style={{
-                              width: `${Math.max(0, Math.min(100, (remaining / c.ttl) * 100))}%`,
-                            }}
-                          />
+                        <div className="mt-1 flex items-center justify-between text-[10px] text-muted">
+                          <span>{c.distanceKm.toLocaleString()} km</span>
+                          {!c.real && <span>{formatBytes(c.bytes)}</span>}
                         </div>
-                      )}
+                      </button>
                     </li>
                   );
                 })
@@ -516,18 +631,58 @@ export function Hud() {
         </aside>
       </div>
 
-      <div className="pointer-events-auto panel-glass rounded-xl md:hidden">
-        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-faint">
-            <Radio className="size-3 text-primary" />
-            Recent · In {inboundCount} · Out {outboundCount}
+      {/* Event ticker */}
+      <div className="pointer-events-auto relative z-10">
+        <div className="panel-glass ticker-track overflow-hidden rounded-xl px-3 py-2">
+          <div className="flex items-center gap-3">
+            <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.14em] text-accent">
+              Feed
+            </span>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              {events.length === 0 ? (
+                <p className="truncate font-mono text-[11px] text-faint">
+                  Events appear here as peers light up the globe…
+                </p>
+              ) : (
+                <ul className="flex gap-6 overflow-x-auto pb-0.5">
+                  {events.slice(0, 12).map((ev) => (
+                    <li
+                      key={`${ev.id}-${ev.at}`}
+                      className="event-flash shrink-0 font-mono text-[11px]"
+                    >
+                      <span
+                        className={
+                          ev.direction === "inbound"
+                            ? "text-primary"
+                            : "text-warn"
+                        }
+                      >
+                        {ev.direction === "inbound" ? "↓" : "↑"}
+                      </span>{" "}
+                      <span className="text-fg">{ev.protocol}</span>
+                      <span className="text-muted">
+                        {" "}
+                        · {ev.city}, {ev.country}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-          <label className="relative">
-            <span className="sr-only">Filter</span>
+        </div>
+
+        {/* Mobile strip */}
+        <div className="panel-glass mt-2 rounded-xl md:hidden">
+          <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+            <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-faint">
+              <Radio className="size-3 text-primary" />
+              Recent
+            </div>
             <select
               value={connFilter}
               onChange={(e) => setConnFilter(e.target.value as ConnFilter)}
-              className="h-7 max-w-[9rem] appearance-none rounded-md border border-border bg-surface-elevated py-0.5 pl-2 pr-6 font-mono text-[10px] text-fg outline-none"
+              className="h-7 max-w-[9rem] rounded-md border border-border bg-surface-elevated px-2 font-mono text-[10px] text-fg"
             >
               {filterOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -535,45 +690,34 @@ export function Hud() {
                 </option>
               ))}
             </select>
-            <ChevronDown
-              className="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-faint"
-              aria-hidden
-            />
-          </label>
-        </div>
-        <ul className="flex gap-2 overflow-x-auto px-2 py-2">
-          {filteredConnections.slice(0, 8).map((c) => (
-            <li
-              key={c.id}
-              className="min-w-[9.5rem] shrink-0 rounded-lg border border-border bg-surface px-2.5 py-2"
-            >
-              <p className="truncate text-xs font-medium text-fg">
-                <span
-                  className={
-                    c.direction === "inbound" ? "text-primary" : "text-warn"
-                  }
+          </div>
+          <ul className="flex gap-2 overflow-x-auto px-2 py-2">
+            {filteredConnections.slice(0, 8).map((c) => (
+              <li key={c.id} className="min-w-[9.5rem] shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(c.id === selectedId ? null : c.id)}
+                  className={`w-full rounded-lg border px-2.5 py-2 text-left ${
+                    c.id === selectedId
+                      ? "border-primary/40 bg-primary/10"
+                      : "border-border bg-surface"
+                  }`}
                 >
-                  {c.direction === "inbound" ? "↓" : "↑"}
-                </span>{" "}
-                {c.city}, {c.country}
-              </p>
-              <p className="font-mono text-[10px] text-muted">
-                {c.protocol} · {c.ip}
-              </p>
-            </li>
-          ))}
-          {connections.length === 0 && (
-            <li className="px-2 py-3 text-xs text-muted">No active links</li>
-          )}
-          {connections.length > 0 && filteredConnections.length === 0 && (
-            <li className="px-2 py-3 text-xs text-muted">No matches</li>
-          )}
-        </ul>
-      </div>
+                  <p className="truncate text-xs font-medium text-fg">
+                    {c.city}, {c.country}
+                  </p>
+                  <p className="font-mono text-[10px] text-muted">{c.protocol}</p>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
 
-      <p className="pointer-events-none mt-2 hidden text-center text-[11px] text-faint sm:block">
-        Drag to orbit · Scroll to zoom · Use the filter on Connections
-      </p>
+        <p className="pointer-events-none mt-2 hidden text-center text-[11px] text-faint sm:block">
+          Drag to orbit · Scroll to zoom · Click a connection to focus · Sound
+          toggle for blips
+        </p>
+      </div>
     </div>
   );
 }
@@ -592,7 +736,7 @@ function Stat({
       <p className="text-[10px] uppercase tracking-wider text-faint">{label}</p>
       <p
         className={`mt-0.5 font-mono text-2xl font-semibold tabular-nums ${
-          accent ? "text-primary" : "text-fg"
+          accent ? "text-primary text-glow" : "text-fg"
         }`}
       >
         {value}
