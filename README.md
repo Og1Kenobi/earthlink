@@ -1,6 +1,6 @@
 # Earthlink
 
-**Live remote connections on a rotating political globe.**
+**Live remote connections on a rotating political globe — NOC-grade.**
 
 Self-host on your server: every public TCP / UDP / DNS / ping peer lights up as a pin and arc to your home location, hangs around, then fades. Inbound is green, outbound is amber.
 
@@ -16,15 +16,20 @@ Self-host on your server: every public TCP / UDP / DNS / ping peer lights up as 
 
 ## Features
 
-- **Real host traffic** — reads live sockets on the machine (`/proc/net/tcp`, UDP, conntrack for DNS/ping)
+- **Real host traffic** — `/proc/net/tcp`, UDP, conntrack (DNS / ping)
 - **Inbound + outbound** — green in, amber out
-- **Tech political map** — country/state boundaries, random fills, neon NOC chrome
-- **Impact rings, heat blooms, pulse packets** along great-circle arcs
-- **Connections panel** — filter by live / direction / protocol (DNS, HTTPS, SSH…)
-- **Mute IPs** — hide noisy peers (e.g. DNS forwarders `8.8.8.8` / `8.8.4.4`) and toggle them back on
-- **Event feed + activity sparkline + sound blips**
-- **Click a row** to focus the arc on the globe
-- **Self-contained server** — static UI + `/api/traffic` agent in one process
+- **Process names** — `ss -p` / inode map (`nginx`, `sshd`, …)
+- **ASN / org** — Cloudflare, Google, etc. on focus + feed
+- **Bandwidth-weighted arcs** + **heat trails**
+- **Security presets** — All · Security · Web · Noise off
+- **Mute IPs** — hide DNS forwarders; toggle back on
+- **Replay scrubber** — scrub recent open/close events
+- **Alerts** — new country, SSH from new /24 (browser notify)
+- **Kiosk / NOC mode** — big globe + ticker
+- **Top talkers** — by rate / bytes
+- **Access-log correlate** — optional nginx path on focus
+- **Interface filter** — `EARTHLINK_IFACES=eth0,wg0`
+- **Event feed + sound blips**
 
 ---
 
@@ -40,38 +45,25 @@ HOST=0.0.0.0 PORT=8080 npm start
 
 Open `http://YOUR_SERVER:8080` — badge should read **LIVE**.
 
-> Nested clone path is fine: if you see `…/earthlink/earthlink`, `cd` into the folder that has `package.json`.
+Full install notes: **[INSTALL.md](./INSTALL.md)**
 
-Full install notes (permissions, systemd, conntrack): **[INSTALL.md](./INSTALL.md)**
-
-### DNS / ping visibility
-
-Short-lived flows need **conntrack**:
-
-```bash
-sudo apt install -y conntrack
-# passwordless for the app user (replace YOUR_USER):
-echo 'YOUR_USER ALL=(root) NOPASSWD: /usr/sbin/conntrack' | sudo tee /etc/sudoers.d/earthlink-conntrack
-sudo chmod 440 /etc/sudoers.d/earthlink-conntrack
-```
-
-### Mute DNS forwarders (optional)
-
-**In the UI:** ban icon on a connection, or Muted IPs panel → add `8.8.8.8` / `8.8.4.4`.
-
-**On the server:**
+### Super-awesome env (optional)
 
 ```bash
 export EARTHLINK_MUTE_IPS=8.8.8.8,8.8.4.4
+export EARTHLINK_ACCESS_LOG=/var/log/nginx/access.log
+export EARTHLINK_IFACES=eth0,wg0          # only these NICs
+export EARTHLINK_HOST_ID=edge-1
+export EARTHLINK_HOME_LAT=… EARTHLINK_HOME_LON=…
 HOST=0.0.0.0 PORT=8080 npm start
 ```
 
-Or:
+### DNS / ping
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/traffic/mute \
-  -H 'content-type: application/json' \
-  -d '{"mute":["8.8.8.8","8.8.4.4"]}'
+sudo apt install -y conntrack
+echo 'YOUR_USER ALL=(root) NOPASSWD: /usr/sbin/conntrack' | sudo tee /etc/sudoers.d/earthlink-conntrack
+sudo chmod 440 /etc/sudoers.d/earthlink-conntrack
 ```
 
 ---
@@ -80,41 +72,26 @@ curl -X POST http://127.0.0.1:8080/api/traffic/mute \
 
 | Shown | Not shown |
 | --- | --- |
-| Established TCP (and short-lived TCP states) | UDP without a tracked peer (unless conntrack) |
-| UDP / DNS / NTP / QUIC when conntrack is available | Private/LAN IPs by default |
-| ICMP ping via conntrack | Packet payloads / HTTP paths |
-| Public remotes with a geo hit | Other hosts (this machine only) |
-
-Set `EARTHLINK_INCLUDE_PRIVATE=1` to include private remotes (often won’t map well).
+| Established TCP (+ short-lived states) | Private/LAN by default |
+| UDP / DNS / NTP / QUIC via conntrack | Packet payloads |
+| ICMP ping via conntrack | Other hosts (unless multi-agent later) |
+| Public remotes with geo + ASN | |
 
 ---
 
 ## Environment
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `HOST` / `PORT` | `0.0.0.0` / `8080` | Bind address |
-| `EARTHLINK_HOME_LAT` / `LON` | auto (public IP) | Pin home on the globe |
-| `EARTHLINK_HOME_LABEL` | — | Home label |
-| `EARTHLINK_MUTE_IPS` | — | Comma-separated IPs to hide |
-| `EARTHLINK_POLL_MS` | `1000–1500` | Socket poll interval |
-| `EARTHLINK_LINGER_MS` | `4500–6000` | Fade after close |
-| `EARTHLINK_INCLUDE_PRIVATE` | off | Set `1` for LAN peers |
-| `EARTHLINK_DIRECTIONS` | `both` | `both`, `inbound`, or `outbound` |
-
----
-
-## Dev
-
-```bash
-npm install
-npm run dev      # http://0.0.0.0:8080
-npm run build
-npm start        # production: UI + traffic agent
-npm run typecheck
-```
-
-Stack: React 19, Vite, TanStack Start, Three.js / R3F, Tailwind v4.
+| Variable | Meaning |
+| --- | --- |
+| `HOST` / `PORT` | Bind (`0.0.0.0:8080`) |
+| `EARTHLINK_HOME_LAT` / `LON` | Pin home |
+| `EARTHLINK_MUTE_IPS` | Comma-separated IPs to hide |
+| `EARTHLINK_IFACES` | Only sockets on these interfaces |
+| `EARTHLINK_ACCESS_LOG` | Nginx/Caddy access log path |
+| `EARTHLINK_HOST_ID` | Label this agent |
+| `EARTHLINK_POLL_MS` / `LINGER_MS` | Poll / fade timing |
+| `EARTHLINK_INCLUDE_PRIVATE` | `1` = include LAN peers |
+| `EARTHLINK_DIRECTIONS` | `both` / `inbound` / `outbound` |
 
 ---
 
@@ -122,14 +99,23 @@ Stack: React 19, Vite, TanStack Start, Three.js / R3F, Tailwind v4.
 
 | Path | Description |
 | --- | --- |
-| `GET /api/traffic` | Snapshot of live connections + home |
-| `GET /api/traffic/health` | Health + counts |
-| `GET /api/traffic/mute` | List server muted IPs |
-| `POST /api/traffic/mute` | `{ "mute": ["1.2.3.4"] }` / `{ "unmute": [...] }` |
-| `GET /api/traffic/stream` | SSE of traffic snapshots |
+| `GET /api/traffic` | Live snapshot (+ process, ASN, top talkers) |
+| `GET /api/traffic/history` | Replay event ring |
+| `GET /api/traffic/health` | Health |
+| `GET/POST /api/traffic/mute` | Mute list |
+| `GET /api/traffic/stream` | SSE |
 
 ---
 
-## License
+## Dev
 
-Private project unless you add a license. Screenshots in [`docs/screenshots/`](./docs/screenshots/).
+```bash
+npm install
+npm run dev
+npm run build && npm start
+npm run typecheck
+```
+
+Stack: React 19, Vite, TanStack Start, Three.js / R3F, Tailwind v4.
+
+Screenshots: [`docs/screenshots/`](./docs/screenshots/).

@@ -23,6 +23,7 @@ export function setCache(ip, value, ttl = POSITIVE_TTL_MS) {
 
 /**
  * Lookup a single public IP. Returns null for private / failed.
+ * Includes ASN/org when the provider supplies it.
  */
 export async function lookupIp(ip) {
   if (!ip) return null;
@@ -45,14 +46,18 @@ export async function lookupIp(ip) {
       region: "",
       country: "Local",
       private: true,
+      org: "Private network",
+      as: null,
+      asn: null,
+      isp: null,
     };
     setCache(ip, lan, POSITIVE_TTL_MS);
     return lan;
   }
 
   try {
-    // ip-api free tier: non-HTTPS, 45 req/min — fine for connection churn
-    const url = `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,country,countryCode,regionName,city,lat,lon,query`;
+    // ip-api free tier: non-HTTPS, 45 req/min — includes as/org/isp
+    const url = `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,country,countryCode,regionName,city,lat,lon,query,as,org,isp,asname`;
     const res = await fetch(url, {
       signal: AbortSignal.timeout(5000),
       headers: { Accept: "application/json" },
@@ -66,6 +71,7 @@ export async function lookupIp(ip) {
       setCache(ip, false, NEGATIVE_TTL_MS);
       return null;
     }
+    const asnMatch = /^AS(\d+)/i.exec(data.as || "");
     const geo = {
       lat: data.lat,
       lon: data.lon,
@@ -73,6 +79,10 @@ export async function lookupIp(ip) {
       region: data.regionName || "",
       country: data.countryCode || data.country || "??",
       private: false,
+      org: data.org || data.asname || data.isp || null,
+      as: data.as || null,
+      asn: asnMatch ? asnMatch[1] : null,
+      isp: data.isp || null,
     };
     setCache(ip, geo, POSITIVE_TTL_MS);
     return geo;
@@ -98,6 +108,12 @@ export async function lookupIp(ip) {
         region: data.region || "",
         country: data.country_code || data.country || "??",
         private: false,
+        org: data.connection?.org || data.connection?.isp || null,
+        as: data.connection?.asn
+          ? `AS${data.connection.asn} ${data.connection.org || ""}`.trim()
+          : null,
+        asn: data.connection?.asn ? String(data.connection.asn) : null,
+        isp: data.connection?.isp || null,
       };
       setCache(ip, geo, POSITIVE_TTL_MS);
       return geo;
@@ -120,37 +136,58 @@ export async function lookupMany(ips, concurrency = 4) {
       result.set(ip, await lookupIp(ip));
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, unique.length) }, () =>
-      worker(),
-    ),
+  const workers = Array.from(
+    { length: Math.min(concurrency, unique.length || 1) },
+    () => worker(),
   );
+  await Promise.all(workers);
   return result;
 }
 
-/** This host's public IP geo (for the amber home pin on the server). */
 export async function lookupSelf() {
   try {
-    const res = await fetch("https://get.geojs.io/v1/ip/geo.json", {
-      signal: AbortSignal.timeout(6000),
-    });
-    if (!res.ok) return null;
+    const res = await fetch(
+      "http://ip-api.com/json/?fields=status,country,countryCode,regionName,city,lat,lon,query,as,org,isp",
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (!res.ok) throw new Error("status");
     const data = await res.json();
-    const lat = Number(data.latitude);
-    const lon = Number(data.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    if (data.status !== "success") throw new Error("fail");
     return {
-      lat,
-      lon,
-      city: data.city || "",
-      region: data.region || "",
-      country: data.country_code || data.country || "",
-      ip: data.ip,
-      label: [data.city, data.region, data.country_code || data.country]
+      lat: data.lat,
+      lon: data.lon,
+      city: data.city,
+      region: data.regionName,
+      country: data.countryCode || data.country,
+      ip: data.query,
+      label: [data.city, data.regionName, data.countryCode]
         .filter(Boolean)
         .join(", "),
+      org: data.org || data.isp || null,
+      as: data.as || null,
     };
   } catch {
-    return null;
+    try {
+      const res = await fetch("https://ipwho.is/", {
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json();
+      if (!data.success) return null;
+      return {
+        lat: data.latitude,
+        lon: data.longitude,
+        city: data.city,
+        region: data.region,
+        country: data.country_code,
+        ip: data.ip,
+        label: [data.city, data.region, data.country_code]
+          .filter(Boolean)
+          .join(", "),
+        org: data.connection?.org || null,
+        as: data.connection?.asn ? `AS${data.connection.asn}` : null,
+      };
+    } catch {
+      return null;
+    }
   }
 }

@@ -1,10 +1,16 @@
 import { useEffect, useRef } from "react";
-import { useConnectionStore, type TrafficDirection } from "@/lib/connection-store";
+import {
+  useConnectionStore,
+  type TrafficDirection,
+  type HistoryEvent,
+  type TopTalker,
+} from "@/lib/connection-store";
 
 type TrafficSnapshot = {
   ok: boolean;
   mode: string;
   error: string | null;
+  hostId?: string;
   home: {
     lat: number;
     lon: number;
@@ -14,6 +20,7 @@ type TrafficSnapshot = {
     city?: string;
     region?: string;
     country?: string;
+    org?: string;
   } | null;
   connections: Array<{
     id: string;
@@ -27,10 +34,23 @@ type TrafficSnapshot = {
     live: boolean;
     lingerMs?: number;
     direction?: TrafficDirection;
+    org?: string | null;
+    as?: string | null;
+    asn?: string | null;
+    process?: string | null;
+    pid?: number | null;
+    iface?: string | null;
+    httpPath?: string | null;
+    httpMethod?: string | null;
+    bytes?: number;
+    bytesPerSec?: number;
+    hostId?: string;
+    transport?: string;
   }>;
   activeCount: number;
   inboundCount?: number;
   outboundCount?: number;
+  topTalkers?: TopTalker[];
 };
 
 const DEMO_INTERVALS: Record<"calm" | "normal" | "busy", [number, number]> = {
@@ -38,6 +58,34 @@ const DEMO_INTERVALS: Record<"calm" | "normal" | "busy", [number, number]> = {
   normal: [600, 1800],
   busy: [180, 700],
 };
+
+function mapRow(c: TrafficSnapshot["connections"][number]) {
+  return {
+    id: c.id,
+    ip: c.ip,
+    city: c.city,
+    country: c.country,
+    lat: c.lat,
+    lon: c.lon,
+    protocol: c.protocol,
+    port: c.port,
+    live: c.live,
+    lingerMs: c.lingerMs,
+    direction: c.direction ?? "outbound",
+    org: c.org,
+    as: c.as,
+    asn: c.asn,
+    process: c.process,
+    pid: c.pid,
+    iface: c.iface,
+    httpPath: c.httpPath,
+    httpMethod: c.httpMethod,
+    bytes: c.bytes,
+    bytesPerSec: c.bytesPerSec,
+    hostId: c.hostId,
+    transport: c.transport,
+  };
+}
 
 export function TrafficFeed() {
   const paused = useConnectionStore((s) => s.paused);
@@ -52,11 +100,15 @@ export function TrafficFeed() {
   const setAgentActiveCount = useConnectionStore((s) => s.setAgentActiveCount);
   const setDirectionCounts = useConnectionStore((s) => s.setDirectionCounts);
   const setHome = useConnectionStore((s) => s.setHome);
+  const setTopTalkers = useConnectionStore((s) => s.setTopTalkers);
+  const setHostId = useConnectionStore((s) => s.setHostId);
+  const pushHistoryEvents = useConnectionStore((s) => s.pushHistoryEvents);
   const demoTimer = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     let pollId: number | null = null;
+    let histId: number | null = null;
     let failStreak = 0;
 
     const apply = (snap: TrafficSnapshot) => {
@@ -71,26 +123,15 @@ export function TrafficFeed() {
           city: snap.home.city,
           region: snap.home.region,
           country: snap.home.country,
+          org: snap.home.org,
         });
       }
+      if (snap.hostId) setHostId(snap.hostId);
       setAgentActiveCount(snap.activeCount ?? 0);
       setDirectionCounts(snap.inboundCount ?? 0, snap.outboundCount ?? 0);
       setAgentError(snap.error);
-      upsertRealConnections(
-        (snap.connections ?? []).map((c) => ({
-          id: c.id,
-          ip: c.ip,
-          city: c.city,
-          country: c.country,
-          lat: c.lat,
-          lon: c.lon,
-          protocol: c.protocol,
-          port: c.port,
-          live: c.live,
-          lingerMs: c.lingerMs,
-          direction: c.direction ?? "outbound",
-        })),
-      );
+      if (snap.topTalkers) setTopTalkers(snap.topTalkers);
+      upsertRealConnections((snap.connections ?? []).map(mapRow));
       setMode("real");
       failStreak = 0;
     };
@@ -98,83 +139,88 @@ export function TrafficFeed() {
     const fail = (msg: string) => {
       failStreak += 1;
       setAgentError(msg);
-      if (failStreak >= 3) {
-        setMode("demo");
-      } else {
-        setMode("connecting");
-      }
+      if (failStreak >= 3) setMode("demo");
     };
 
     const poll = async () => {
       try {
-        const res = await fetch("/api/traffic", { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const snap = (await res.json()) as TrafficSnapshot;
+        const r = await fetch("/api/traffic", {
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const snap = (await r.json()) as TrafficSnapshot;
         apply(snap);
       } catch (e) {
         fail(e instanceof Error ? e.message : "agent offline");
       }
     };
 
+    const pollHistory = async () => {
+      try {
+        const r = await fetch("/api/traffic/history", {
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) return;
+        const j = (await r.json()) as { events?: HistoryEvent[] };
+        if (j.events?.length) {
+          pushHistoryEvents(
+            j.events.map((e) => ({
+              ...e,
+              direction: (e.direction as TrafficDirection) || "outbound",
+            })),
+          );
+        }
+      } catch {
+        // optional
+      }
+    };
+
     void poll();
+    void pollHistory();
     pollId = window.setInterval(() => void poll(), 1500);
+    histId = window.setInterval(() => void pollHistory(), 8000);
 
     return () => {
       cancelled = true;
-      if (pollId) window.clearInterval(pollId);
+      if (pollId) clearInterval(pollId);
+      if (histId) clearInterval(histId);
     };
   }, [
-    setAgentActiveCount,
+    upsertRealConnections,
+    setMode,
     setAgentError,
+    setAgentActiveCount,
     setDirectionCounts,
     setHome,
-    setMode,
-    upsertRealConnections,
+    setTopTalkers,
+    setHostId,
+    pushHistoryEvents,
   ]);
 
+  // Demo spawner when agent offline
   useEffect(() => {
     if (mode === "real" || mode === "connecting") {
-      if (demoTimer.current) window.clearTimeout(demoTimer.current);
-      demoTimer.current = null;
-      return;
-    }
-    if (paused) {
-      if (demoTimer.current) window.clearTimeout(demoTimer.current);
-      demoTimer.current = null;
-      return;
-    }
-
-    const seed = window.setTimeout(() => {
-      for (let i = 0; i < 3; i++) {
-        window.setTimeout(
-          () =>
-            spawnConnection({
-              direction: i % 2 === 0 ? "inbound" : "outbound",
-            }),
-          i * 280,
-        );
+      if (demoTimer.current) {
+        clearTimeout(demoTimer.current);
+        demoTimer.current = null;
       }
-    }, 400);
+      return;
+    }
+    if (paused) return;
 
     const schedule = () => {
-      const [min, max] = DEMO_INTERVALS[intensity];
-      const delay = min + Math.random() * (max - min);
+      const [lo, hi] = DEMO_INTERVALS[intensity];
+      const wait = lo + Math.random() * (hi - lo);
       demoTimer.current = window.setTimeout(() => {
         spawnConnection();
-        if (Math.random() < 0.12) {
-          const burst = 1 + Math.floor(Math.random() * 3);
-          for (let i = 0; i < burst; i++) {
-            window.setTimeout(() => spawnConnection(), 80 + i * 120);
-          }
-        }
         schedule();
-      }, delay);
+      }, wait);
     };
     schedule();
-
     return () => {
-      window.clearTimeout(seed);
-      if (demoTimer.current) window.clearTimeout(demoTimer.current);
+      if (demoTimer.current) clearTimeout(demoTimer.current);
     };
   }, [mode, paused, intensity, spawnConnection]);
 

@@ -43,11 +43,11 @@ async function readBody(req) {
 
 /**
  * Handle /api/traffic* requests. Returns true if handled.
- * Works with Node http IncomingMessage / ServerResponse and Connect middleware.
  */
 export async function handleTrafficApi(req, res, urlPath) {
   const path = urlPath.split("?")[0];
   const method = (req.method || "GET").toUpperCase();
+  const url = new URL(req.url || "/", "http://localhost");
 
   if (method === "OPTIONS" && path.startsWith("/api/traffic")) {
     res.statusCode = 204;
@@ -82,6 +82,22 @@ export async function handleTrafficApi(req, res, urlPath) {
       error: snap.error,
       home: snap.home,
       mutedIps: snap.mutedIps ?? [],
+      hostId: snap.hostId,
+      topTalkers: snap.topTalkers?.slice(0, 5),
+    });
+    return true;
+  }
+
+  if (path === "/api/traffic/history") {
+    const c = getCollector();
+    const since = Number(url.searchParams.get("since") || 0);
+    const events = c.getHistory(since);
+    sendJson(res, 200, {
+      ok: true,
+      hostId: c.hostId,
+      count: events.length,
+      events,
+      serverTime: Date.now(),
     });
     return true;
   }
@@ -127,7 +143,6 @@ export async function handleTrafficApi(req, res, urlPath) {
   }
 
   if (path === "/api/traffic/stream") {
-    // Server-Sent Events for lower latency without a WS dependency
     const c = getCollector();
     res.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",

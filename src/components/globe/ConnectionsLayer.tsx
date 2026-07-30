@@ -5,9 +5,11 @@ import * as THREE from "three";
 import {
   connectionLife,
   isIpMuted,
+  matchesSecurityPreset,
   protocolWeight,
   useConnectionStore,
   type Connection,
+  type TrailPoint,
 } from "@/lib/connection-store";
 import { createArcPoints, latLonToVector3 } from "@/lib/geo";
 import { EARTH_RADIUS } from "./Earth";
@@ -55,10 +57,8 @@ function ImpactRing({
       return;
     }
     ref.current.visible = true;
-    const s = 1 + age * 4.5;
-    ref.current.scale.setScalar(s);
-    const m = ref.current.material as THREE.MeshBasicMaterial;
-    m.opacity = (1 - age) * 0.65;
+    ref.current.scale.setScalar(1 + age * 4.5);
+    (ref.current.material as THREE.MeshBasicMaterial).opacity = (1 - age) * 0.65;
   });
 
   return (
@@ -70,6 +70,41 @@ function ImpactRing({
         side={THREE.DoubleSide}
         depthWrite={false}
         toneMapped={false}
+      />
+    </mesh>
+  );
+}
+
+function HeatTrail({ trail }: { trail: TrailPoint }) {
+  const ref = useRef<THREE.Mesh>(null);
+  const pos = useMemo(
+    () => latLonToVector3(trail.lat, trail.lon, SURFACE * 1.01),
+    [trail.lat, trail.lon],
+  );
+
+  useFrame(() => {
+    if (!ref.current) return;
+    const age = (performance.now() - trail.born) / trail.ttl;
+    if (age >= 1) {
+      ref.current.visible = false;
+      return;
+    }
+    ref.current.visible = true;
+    const s = 0.8 + age * 2.8;
+    ref.current.scale.setScalar(s);
+    (ref.current.material as THREE.MeshBasicMaterial).opacity =
+      (1 - age) * 0.45;
+  });
+
+  return (
+    <mesh ref={ref} position={pos} renderOrder={8}>
+      <sphereGeometry args={[0.04, 12, 12]} />
+      <meshBasicMaterial
+        color={trail.color}
+        transparent
+        depthWrite={false}
+        toneMapped={false}
+        blending={THREE.AdditiveBlending}
       />
     </mesh>
   );
@@ -94,7 +129,8 @@ function ConnectionArc({
 
   const direction = conn.direction === "inbound" ? "inbound" : "outbound";
   const colors = COLORS[direction];
-  const weight = protocolWeight(conn.protocol) * (selected ? 1.45 : 1);
+  const weight =
+    protocolWeight(conn.protocol, conn.bytesPerSec || 0) * (selected ? 1.45 : 1);
 
   const { points, remotePos } = useMemo(() => {
     const remotePos = latLonToVector3(conn.lat, conn.lon, SURFACE);
@@ -163,7 +199,7 @@ function ConnectionArc({
         <Line
           points={linePoints}
           color={colors.glow}
-          lineWidth={3.5 * weight}
+          lineWidth={3.8 * weight}
           transparent
           opacity={0.3}
           depthWrite={false}
@@ -175,7 +211,7 @@ function ConnectionArc({
         <Line
           points={linePoints}
           color={selected ? "#ffffff" : colors.arc}
-          lineWidth={2.1 * weight}
+          lineWidth={2.2 * weight}
           transparent
           opacity={0.95}
           depthWrite={false}
@@ -305,7 +341,7 @@ function HomeBeacon({ lat, lon }: { lat: number; lon: number }) {
   );
 }
 
-function useVisibleConnections(connections: Connection[], max = 24) {
+function useVisibleConnections(connections: Connection[], max = 28) {
   return useMemo(() => {
     const live = connections.filter((c) => c.live !== false);
     const fading = connections.filter((c) => c.live === false);
@@ -313,17 +349,76 @@ function useVisibleConnections(connections: Connection[], max = 24) {
   }, [connections, max]);
 }
 
-export function ConnectionsLayer() {
+/** Connections as they should appear under mute + preset + optional replay */
+function useDisplayConnections() {
   const connections = useConnectionStore((s) => s.connections);
   const mutedPeers = useConnectionStore((s) => s.mutedPeers);
+  const preset = useConnectionStore((s) => s.securityPreset);
+  const replayMs = useConnectionStore((s) => s.replayMs);
+  const history = useConnectionStore((s) => s.history);
+
+  return useMemo(() => {
+    if (replayMs != null && history.length) {
+      // Reconstruct "open" events active at scrub time (last 12s window)
+      const windowStart = replayMs - 12_000;
+      const opens = new Map<string, (typeof history)[0]>();
+      for (const e of history) {
+        if (e.at > replayMs) break;
+        if (e.type === "open" && e.at >= windowStart) opens.set(e.id, e);
+        if (e.type === "close") opens.delete(e.id);
+      }
+      return [...opens.values()]
+        .filter((e) => !isIpMuted(e.ip, mutedPeers))
+        .map(
+          (e) =>
+            ({
+              id: e.id,
+              ip: e.ip,
+              city: e.city,
+              country: e.country,
+              lat: e.lat,
+              lon: e.lon,
+              protocol: e.protocol,
+              port: e.port,
+              bytes: 0,
+              createdAt: performance.now() - 1000,
+              ttl: 60_000,
+              distanceKm: 0,
+              live: true,
+              real: true,
+              direction: e.direction,
+              process: e.process,
+              org: e.org,
+              asn: e.asn,
+              hostId: e.hostId,
+            }) satisfies Connection,
+        )
+        .filter((c) => matchesSecurityPreset(c, preset));
+    }
+
+    return connections
+      .filter((c) => !isIpMuted(c.ip, mutedPeers))
+      .filter((c) => matchesSecurityPreset(c, preset));
+  }, [connections, mutedPeers, preset, replayMs, history]);
+}
+
+export function ConnectionsLayer() {
   const home = useConnectionStore((s) => s.home);
   const selectedId = useConnectionStore((s) => s.selectedId);
+  const trails = useConnectionStore((s) => s.trails);
+  const mutedPeers = useConnectionStore((s) => s.mutedPeers);
+  const preset = useConnectionStore((s) => s.securityPreset);
+  const display = useDisplayConnections();
+  const visible = useVisibleConnections(display, 32);
 
-  const unmuted = useMemo(
-    () => connections.filter((c) => !isIpMuted(c.ip, mutedPeers)),
-    [connections, mutedPeers],
+  const displayTrails = useMemo(
+    () =>
+      trails.filter((t) => {
+        // trails don't have org/protocol — keep all unmuted region roughly
+        return true;
+      }),
+    [trails, mutedPeers, preset],
   );
-  const visible = useVisibleConnections(unmuted, 28);
 
   useFrame(() => {
     useConnectionStore.getState().tick(performance.now());
@@ -332,6 +427,9 @@ export function ConnectionsLayer() {
   return (
     <group>
       <HomeBeacon lat={home.lat} lon={home.lon} />
+      {displayTrails.map((t) => (
+        <HeatTrail key={t.id} trail={t} />
+      ))}
       {visible.map((c) => (
         <ConnectionArc
           key={c.id}

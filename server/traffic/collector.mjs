@@ -1,5 +1,8 @@
 import { readAllConnections, isPrivateIp } from "./connections.mjs";
 import { lookupMany, lookupSelf } from "./geoip.mjs";
+import { loadProcessMap, resolveProcess } from "./process.mjs";
+import { loadLocalIpIfaces, parseIfaceFilter } from "./ifaces.mjs";
+import { createAccessLogWatcher } from "./access-log.mjs";
 
 function parseMuteEnv() {
   const raw = process.env.EARTHLINK_MUTE_IPS || "";
@@ -11,9 +14,15 @@ function parseMuteEnv() {
   );
 }
 
+const HOST_ID =
+  process.env.EARTHLINK_HOST_ID ||
+  process.env.EARTHLINK_HOSTNAME ||
+  process.env.HOSTNAME ||
+  "local";
+
 /**
- * Live traffic collector — polls sockets, geolocates remotes, tracks lifetimes.
- * TCP (+handshake), UDP (DNS/NTP/QUIC…), ICMP/ping when conntrack is on.
+ * Live traffic collector — full NOC data:
+ * process names, ASN/org, bytes, iface filter, access-log correlate, event history.
  */
 export function createTrafficCollector(options = {}) {
   const pollMs = options.pollMs ?? Number(process.env.EARTHLINK_POLL_MS || 1000);
@@ -21,15 +30,21 @@ export function createTrafficCollector(options = {}) {
     options.lingerMs ?? Number(process.env.EARTHLINK_LINGER_MS || 6000);
   const includePrivate = options.includePrivate ?? false;
   const maxConnections = options.maxConnections ?? 160;
-  // inbound | outbound | both
   const directions =
     options.directions ?? process.env.EARTHLINK_DIRECTIONS ?? "both";
+  const ifaceFilter = parseIfaceFilter(
+    options.ifaces ?? process.env.EARTHLINK_IFACES,
+  );
+  const historyMax = Number(process.env.EARTHLINK_HISTORY_MAX || 4000);
+  const historyKeepMs = Number(
+    process.env.EARTHLINK_HISTORY_MS || 45 * 60 * 1000,
+  );
 
-  /** Runtime mute list (plus EARTHLINK_MUTE_IPS env). */
   const mutedIps = parseMuteEnv();
-
   /** @type {Map<string, object>} */
   const active = new Map();
+  /** @type {Array<object>} ring of connection events for replay */
+  const history = [];
   let home = null;
   let lastError = null;
   let pollCount = 0;
@@ -37,6 +52,11 @@ export function createTrafficCollector(options = {}) {
   let timer = null;
   let polling = false;
   let lastSources = { tcp: 0, udp: 0, icmp: 0 };
+  let processMap = new Map();
+  let ifaceMap = new Map();
+  let processRefreshAt = 0;
+
+  const accessLog = createAccessLogWatcher();
 
   async function ensureHome() {
     if (home) return home;
@@ -64,6 +84,8 @@ export function createTrafficCollector(options = {}) {
         city: self.city,
         region: self.region,
         country: self.country,
+        org: self.org,
+        as: self.as,
       };
     }
     return home;
@@ -96,6 +118,29 @@ export function createTrafficCollector(options = {}) {
     return [...mutedIps].sort();
   }
 
+  function pushHistory(ev) {
+    history.push(ev);
+    const cutoff = Date.now() - historyKeepMs;
+    while (history.length && history[0].at < cutoff) history.shift();
+    while (history.length > historyMax) history.shift();
+  }
+
+  async function refreshSideData(now) {
+    if (now - processRefreshAt > 4000) {
+      processRefreshAt = now;
+      try {
+        processMap = await loadProcessMap();
+      } catch {
+        // ignore
+      }
+      try {
+        ifaceMap = await loadLocalIpIfaces();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   async function pollOnce() {
     if (polling) return;
     polling = true;
@@ -103,6 +148,7 @@ export function createTrafficCollector(options = {}) {
     const now = Date.now();
     try {
       await ensureHome();
+      await refreshSideData(now);
       const socks = await readAllConnections();
       lastError = null;
 
@@ -117,6 +163,13 @@ export function createTrafficCollector(options = {}) {
       const candidates = socks.filter((s) => {
         if (isMuted(s.remoteIp)) return false;
         if (!directionAllowed(s.direction)) return false;
+        if (ifaceFilter && ifaceFilter.size) {
+          const iface = ifaceMap.get(s.localIp) || "unknown";
+          s.iface = iface;
+          if (!ifaceFilter.has(iface) && !ifaceFilter.has("*")) return false;
+        } else {
+          s.iface = ifaceMap.get(s.localIp) || null;
+        }
         if (includePrivate) return true;
         return !s.private && !isPrivateIp(s.remoteIp);
       });
@@ -127,6 +180,10 @@ export function createTrafficCollector(options = {}) {
       for (const s of candidates) {
         const geo = geos.get(s.remoteIp);
         if (!geo || geo.private || geo.lat == null || geo.lon == null) continue;
+
+        const proc = resolveProcess(s, processMap);
+        const logHit = accessLog.lookup(s.remoteIp);
+        const bytes = Number(s.bytes) || 0;
 
         seenKeys.add(s.key);
         const existing = active.get(s.key);
@@ -140,10 +197,28 @@ export function createTrafficCollector(options = {}) {
           existing.servicePort = s.servicePort;
           existing.displayPort = s.displayPort ?? s.servicePort;
           existing.transport = s.transport || "tcp";
+          existing.process = proc?.process ?? existing.process ?? null;
+          existing.pid = proc?.pid ?? existing.pid ?? null;
+          existing.org = geo.org ?? existing.org;
+          existing.as = geo.as ?? existing.as;
+          existing.asn = geo.asn ?? existing.asn;
+          existing.isp = geo.isp ?? existing.isp;
+          existing.iface = s.iface ?? existing.iface;
+          existing.bytes = Math.max(existing.bytes || 0, bytes);
+          if (logHit) {
+            existing.httpPath = logHit.path;
+            existing.httpMethod = logHit.method;
+            existing.httpStatus = logHit.status;
+          }
+          // crude rate
+          const dt = Math.max(0.001, (now - (existing._rateAt || existing.createdAt)) / 1000);
+          const dBytes = Math.max(0, (existing.bytes || 0) - (existing._prevBytes || 0));
+          existing.bytesPerSec = dBytes / dt;
+          existing._prevBytes = existing.bytes;
+          existing._rateAt = now;
         } else {
-          // DNS / ICMP / UDP are very short-lived — slightly longer linger
           const transport = s.transport || "tcp";
-          active.set(s.key, {
+          const row = {
             id: s.key,
             ip: s.remoteIp,
             city: geo.city,
@@ -151,6 +226,10 @@ export function createTrafficCollector(options = {}) {
             region: geo.region,
             lat: geo.lat,
             lon: geo.lon,
+            org: geo.org || null,
+            as: geo.as || null,
+            asn: geo.asn || null,
+            isp: geo.isp || null,
             protocol: s.protocol,
             port: s.displayPort ?? s.servicePort ?? s.remotePort,
             remotePort: s.remotePort,
@@ -159,11 +238,39 @@ export function createTrafficCollector(options = {}) {
             direction: s.direction,
             servicePort: s.servicePort,
             transport,
-            bytes: 0,
+            process: proc?.process || null,
+            pid: proc?.pid || null,
+            iface: s.iface || null,
+            httpPath: logHit?.path || null,
+            httpMethod: logHit?.method || null,
+            httpStatus: logHit?.status || null,
+            bytes,
+            bytesPerSec: 0,
+            _prevBytes: bytes,
+            _rateAt: now,
             createdAt: now,
             lastSeen: now,
             goneAt: null,
             real: true,
+            hostId: HOST_ID,
+          };
+          active.set(s.key, row);
+          pushHistory({
+            type: "open",
+            at: now,
+            id: row.id,
+            ip: row.ip,
+            city: row.city,
+            country: row.country,
+            lat: row.lat,
+            lon: row.lon,
+            protocol: row.protocol,
+            port: row.port,
+            direction: row.direction,
+            process: row.process,
+            org: row.org,
+            asn: row.asn,
+            hostId: HOST_ID,
           });
         }
       }
@@ -171,15 +278,29 @@ export function createTrafficCollector(options = {}) {
       for (const [key, conn] of active) {
         if (!seenKeys.has(key) && conn.goneAt == null) {
           conn.goneAt = now;
+          pushHistory({
+            type: "close",
+            at: now,
+            id: conn.id,
+            ip: conn.ip,
+            city: conn.city,
+            country: conn.country,
+            lat: conn.lat,
+            lon: conn.lon,
+            protocol: conn.protocol,
+            port: conn.port,
+            direction: conn.direction,
+            process: conn.process,
+            org: conn.org,
+            asn: conn.asn,
+            hostId: HOST_ID,
+          });
         }
       }
 
       for (const [key, conn] of active) {
-        // Keep DNS/PING on the map a bit longer so you can actually see them
         const extra =
-          conn.transport === "udp" || conn.transport === "icmp"
-            ? 2500
-            : 0;
+          conn.transport === "udp" || conn.transport === "icmp" ? 2500 : 0;
         if (conn.goneAt != null && now - conn.goneAt > lingerMs + extra) {
           active.delete(key);
         }
@@ -218,8 +339,13 @@ export function createTrafficCollector(options = {}) {
           ip: c.ip,
           city: c.city,
           country: c.country,
+          region: c.region,
           lat: c.lat,
           lon: c.lon,
+          org: c.org,
+          as: c.as,
+          asn: c.asn,
+          isp: c.isp,
           protocol: c.protocol,
           port: c.port,
           localPort: c.localPort,
@@ -227,12 +353,20 @@ export function createTrafficCollector(options = {}) {
           direction: c.direction || "outbound",
           servicePort: c.servicePort,
           transport: c.transport || "tcp",
-          bytes: c.bytes,
+          process: c.process,
+          pid: c.pid,
+          iface: c.iface,
+          httpPath: c.httpPath,
+          httpMethod: c.httpMethod,
+          httpStatus: c.httpStatus,
+          bytes: c.bytes || 0,
+          bytesPerSec: c.bytesPerSec || 0,
           createdAt: c.createdAt,
           lastSeen: c.lastSeen,
           goneAt: c.goneAt,
           live,
           real: true,
+          hostId: c.hostId || HOST_ID,
           serverNow: now,
           lingerMs: linger,
           ttl: live ? 999_999 : linger,
@@ -243,6 +377,26 @@ export function createTrafficCollector(options = {}) {
     const live = connections.filter((c) => c.live);
     const inboundCount = live.filter((c) => c.direction === "inbound").length;
     const outboundCount = live.filter((c) => c.direction === "outbound").length;
+
+    // top talkers (by bytesPerSec then bytes)
+    const topTalkers = [...live]
+      .sort(
+        (a, b) =>
+          (b.bytesPerSec || 0) - (a.bytesPerSec || 0) ||
+          (b.bytes || 0) - (a.bytes || 0),
+      )
+      .slice(0, 12)
+      .map((c) => ({
+        ip: c.ip,
+        city: c.city,
+        country: c.country,
+        org: c.org,
+        protocol: c.protocol,
+        process: c.process,
+        bytes: c.bytes,
+        bytesPerSec: c.bytesPerSec,
+        direction: c.direction,
+      }));
 
     return {
       ok: true,
@@ -259,15 +413,25 @@ export function createTrafficCollector(options = {}) {
       totalTracked: connections.length,
       sources: lastSources,
       mutedIps: listMuted(),
+      topTalkers,
+      hostId: HOST_ID,
+      ifaces: ifaceFilter ? [...ifaceFilter] : null,
+      accessLog: accessLog.path || null,
       serverTime: now,
-      hostname: process.env.EARTHLINK_HOSTNAME || undefined,
+      hostname: process.env.EARTHLINK_HOSTNAME || process.env.HOSTNAME || undefined,
       listenHint: process.env.EARTHLINK_LISTEN || "0.0.0.0:8080",
     };
+  }
+
+  function getHistory(sinceMs = 0) {
+    const since = sinceMs > 0 ? sinceMs : Date.now() - historyKeepMs;
+    return history.filter((e) => e.at >= since);
   }
 
   function start() {
     if (running) return;
     running = true;
+    accessLog.start();
     void pollOnce();
     timer = setInterval(() => void pollOnce(), pollMs);
     if (typeof timer.unref === "function") timer.unref();
@@ -275,6 +439,7 @@ export function createTrafficCollector(options = {}) {
 
   function stop() {
     running = false;
+    accessLog.stop();
     if (timer) clearInterval(timer);
     timer = null;
   }
@@ -289,5 +454,7 @@ export function createTrafficCollector(options = {}) {
     unmuteIp,
     listMuted,
     isMuted,
+    getHistory,
+    hostId: HOST_ID,
   };
 }

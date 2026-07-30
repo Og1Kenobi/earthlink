@@ -19,6 +19,8 @@ import {
 
 export type TrafficDirection = "inbound" | "outbound";
 
+export type SecurityPreset = "all" | "security" | "web" | "noise-off";
+
 export type Connection = {
   id: string;
   ip: string;
@@ -29,6 +31,7 @@ export type Connection = {
   protocol: string;
   port: number;
   bytes: number;
+  bytesPerSec?: number;
   createdAt: number;
   ttl: number;
   distanceKm: number;
@@ -36,6 +39,16 @@ export type Connection = {
   live?: boolean;
   direction?: TrafficDirection;
   impactAt?: number;
+  org?: string | null;
+  as?: string | null;
+  asn?: string | null;
+  process?: string | null;
+  pid?: number | null;
+  iface?: string | null;
+  httpPath?: string | null;
+  httpMethod?: string | null;
+  hostId?: string;
+  transport?: string;
 };
 
 export type TrafficEvent = {
@@ -47,6 +60,43 @@ export type TrafficEvent = {
   city: string;
   country: string;
   ip: string;
+  process?: string | null;
+  org?: string | null;
+};
+
+export type AlertItem = {
+  id: string;
+  at: number;
+  level: "info" | "warn" | "danger";
+  text: string;
+};
+
+export type HistoryEvent = {
+  type: "open" | "close";
+  at: number;
+  id: string;
+  ip: string;
+  city: string;
+  country: string;
+  lat: number;
+  lon: number;
+  protocol: string;
+  port: number;
+  direction: TrafficDirection;
+  process?: string | null;
+  org?: string | null;
+  asn?: string | null;
+  hostId?: string;
+};
+
+export type TrailPoint = {
+  id: string;
+  lat: number;
+  lon: number;
+  color: string;
+  born: number;
+  ttl: number;
+  direction: TrafficDirection;
 };
 
 export type Home = {
@@ -59,9 +109,22 @@ export type Home = {
   country?: string;
   ip?: string;
   accuracyM?: number;
+  org?: string;
 };
 
 export type TrafficMode = "real" | "demo" | "connecting";
+
+export type TopTalker = {
+  ip: string;
+  city: string;
+  country: string;
+  org?: string | null;
+  protocol: string;
+  process?: string | null;
+  bytes: number;
+  bytesPerSec: number;
+  direction: string;
+};
 
 type RealRow = {
   id: string;
@@ -75,7 +138,24 @@ type RealRow = {
   live: boolean;
   lingerMs?: number;
   direction?: TrafficDirection;
+  org?: string | null;
+  as?: string | null;
+  asn?: string | null;
+  process?: string | null;
+  pid?: number | null;
+  iface?: string | null;
+  httpPath?: string | null;
+  httpMethod?: string | null;
+  bytes?: number;
+  bytesPerSec?: number;
+  hostId?: string;
+  transport?: string;
 };
+
+const CDN_ORGS =
+  /cloudflare|akamai|fastly|amazon|aws|google|microsoft|azure|digitalocean|linode|ovh|hetzner|cdn/i;
+const NOISE_PROTO = /^(DNS|NTP|PING|ICMP|QUIC)$/i;
+const SECURITY_PORTS = new Set([22, 23, 3389, 5900, 445, 21, 3306, 5432, 27017]);
 
 type State = {
   home: Home;
@@ -95,6 +175,19 @@ type State = {
   soundEnabled: boolean;
   mutedPeers: MutedPeer[];
   activityHistory: number[];
+  topTalkers: TopTalker[];
+  hostId: string | null;
+  securityPreset: SecurityPreset;
+  kiosk: boolean;
+  alerts: AlertItem[];
+  alertsEnabled: boolean;
+  history: HistoryEvent[];
+  replayMs: number | null; // null = live
+  replayWindowMs: number;
+  trails: TrailPoint[];
+  multiHosts: string[]; // extra agent base URLs
+  seenCountries: Set<string>;
+  seenSshSubnets: Set<string>;
   setHome: (home: Partial<Home> & { lat: number; lon: number }) => void;
   setHomeReady: (ready: boolean) => void;
   setPaused: (paused: boolean) => void;
@@ -105,7 +198,13 @@ type State = {
   setDirectionCounts: (inb: number, out: number) => void;
   setSelectedId: (id: string | null) => void;
   setSoundEnabled: (on: boolean) => void;
-  pushActivitySample: (n: number) => void;
+  setSecurityPreset: (p: SecurityPreset) => void;
+  setKiosk: (on: boolean) => void;
+  setAlertsEnabled: (on: boolean) => void;
+  setReplayMs: (ms: number | null) => void;
+  setTopTalkers: (t: TopTalker[]) => void;
+  setHostId: (id: string | null) => void;
+  pushHistoryEvents: (evs: HistoryEvent[]) => void;
   hydrateMutes: () => void;
   muteIp: (ip: string, meta?: { label?: string; note?: string }) => void;
   unmuteIp: (ip: string) => void;
@@ -118,6 +217,7 @@ type State = {
   upsertRealConnections: (rows: RealRow[]) => void;
   tick: (now: number) => void;
   clear: () => void;
+  clearAlerts: () => void;
 };
 
 let idSeq = 0;
@@ -136,9 +236,11 @@ function eventText(c: {
   country: string;
   ip: string;
   port: number;
+  process?: string | null;
 }): string {
   const dir = c.direction === "inbound" ? "IN" : "OUT";
-  return `${dir} ${c.protocol} · ${c.city}, ${c.country} · ${c.ip}${c.port ? `:${c.port}` : ""}`;
+  const proc = c.process ? ` · ${c.process}` : "";
+  return `${dir} ${c.protocol}${proc} · ${c.city}, ${c.country} · ${c.ip}${c.port ? `:${c.port}` : ""}`;
 }
 
 function recount(list: Connection[], muted: MutedPeer[]) {
@@ -157,6 +259,78 @@ function recount(list: Connection[], muted: MutedPeer[]) {
 
 function persistMute(peers: MutedPeer[]) {
   saveMutedPeers(peers);
+}
+
+function subnet24(ip: string): string {
+  const p = ip.split(".");
+  if (p.length === 4) return `${p[0]}.${p[1]}.${p[2]}.0/24`;
+  return ip;
+}
+
+function pushAlert(
+  alerts: AlertItem[],
+  level: AlertItem["level"],
+  text: string,
+): AlertItem[] {
+  const a: AlertItem = {
+    id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    at: Date.now(),
+    level,
+    text,
+  };
+  return [a, ...alerts].slice(0, 40);
+}
+
+export function matchesSecurityPreset(
+  c: Connection,
+  preset: SecurityPreset,
+): boolean {
+  if (preset === "all") return true;
+  const proto = (c.protocol || "").toUpperCase();
+  const org = c.org || "";
+  if (preset === "noise-off") {
+    if (NOISE_PROTO.test(proto)) return false;
+    if (CDN_ORGS.test(org)) return false;
+    return true;
+  }
+  if (preset === "web") {
+    return (
+      proto.includes("HTTP") ||
+      proto.includes("HTTPS") ||
+      proto.includes("QUIC") ||
+      c.port === 80 ||
+      c.port === 443 ||
+      c.port === 8080 ||
+      c.port === 8443
+    );
+  }
+  if (preset === "security") {
+    return (
+      SECURITY_PORTS.has(c.port) ||
+      proto.includes("SSH") ||
+      proto.includes("RDP") ||
+      proto.includes("VNC") ||
+      proto.includes("FTP") ||
+      proto.includes("Telnet") ||
+      proto.includes("SMB")
+    );
+  }
+  return true;
+}
+
+export function protocolWeight(protocol: string, bytesPerSec = 0): number {
+  const p = (protocol || "").toUpperCase();
+  let base = 0.95;
+  if (p.includes("SSH") || p.includes("RDP")) base = 1.4;
+  else if (p.includes("DNS") || p.includes("PING") || p.includes("ICMP"))
+    base = 0.7;
+  else if (p.includes("HTTPS") || p.includes("HTTP")) base = 1.1;
+  else if (p.includes("QUIC")) base = 1.0;
+  // bandwidth boost
+  if (bytesPerSec > 500_000) base *= 1.8;
+  else if (bytesPerSec > 50_000) base *= 1.35;
+  else if (bytesPerSec > 5_000) base *= 1.15;
+  return base;
 }
 
 export const useConnectionStore = create<State>((set, get) => ({
@@ -182,6 +356,19 @@ export const useConnectionStore = create<State>((set, get) => ({
   soundEnabled: true,
   mutedPeers: [],
   activityHistory: Array.from({ length: 32 }, () => 0),
+  topTalkers: [],
+  hostId: null,
+  securityPreset: "all",
+  kiosk: false,
+  alerts: [],
+  alertsEnabled: true,
+  history: [],
+  replayMs: null,
+  replayWindowMs: 45 * 60 * 1000,
+  trails: [],
+  multiHosts: [],
+  seenCountries: new Set(),
+  seenSshSubnets: new Set(),
 
   setHome: (home) =>
     set((s) => ({
@@ -207,10 +394,23 @@ export const useConnectionStore = create<State>((set, get) => ({
     setFxAudioEnabled(soundEnabled);
     set({ soundEnabled });
   },
-  pushActivitySample: (n) =>
-    set((s) => ({
-      activityHistory: [...s.activityHistory.slice(-31), n],
-    })),
+  setSecurityPreset: (securityPreset) => set({ securityPreset }),
+  setKiosk: (kiosk) => set({ kiosk }),
+  setAlertsEnabled: (alertsEnabled) => set({ alertsEnabled }),
+  setReplayMs: (replayMs) => set({ replayMs }),
+  setTopTalkers: (topTalkers) => set({ topTalkers }),
+  setHostId: (hostId) => set({ hostId }),
+  pushHistoryEvents: (evs) =>
+    set((s) => {
+      if (!evs.length) return s;
+      const known = new Set(s.history.map((h) => `${h.type}:${h.id}:${h.at}`));
+      const add = evs.filter((e) => !known.has(`${e.type}:${e.id}:${e.at}`));
+      if (!add.length) return s;
+      const history = [...s.history, ...add]
+        .sort((a, b) => a.at - b.at)
+        .slice(-5000);
+      return { history };
+    }),
 
   hydrateMutes: () => {
     const loaded = loadMutedPeers();
@@ -335,6 +535,7 @@ export const useConnectionStore = create<State>((set, get) => ({
       protocol,
       port,
       bytes: Math.floor(Math.random() * 900_000) + 1200,
+      bytesPerSec: Math.random() * 40_000,
       createdAt: now,
       ttl: ttlForIntensity(intensity),
       distanceKm: Math.round(
@@ -344,6 +545,8 @@ export const useConnectionStore = create<State>((set, get) => ({
       live: true,
       direction,
       impactAt: now,
+      org: null,
+      process: null,
     };
 
     const muted = isIpMuted(conn.ip, mutedPeers);
@@ -351,6 +554,15 @@ export const useConnectionStore = create<State>((set, get) => ({
 
     set((s) => {
       const connections = [conn, ...s.connections].slice(0, 80);
+      const trail: TrailPoint = {
+        id: `t-${conn.id}`,
+        lat: conn.lat,
+        lon: conn.lon,
+        color: direction === "inbound" ? "#2ee6a6" : "#f59e0b",
+        born: now,
+        ttl: 25000,
+        direction,
+      };
       const ev: TrafficEvent = {
         id: conn.id,
         at: now,
@@ -365,17 +577,29 @@ export const useConnectionStore = create<State>((set, get) => ({
         connections,
         totalSeen: s.totalSeen + 1,
         events: muted ? s.events : [ev, ...s.events].slice(0, 40),
+        trails: muted ? s.trails : [trail, ...s.trails].slice(0, 120),
         ...recount(connections, s.mutedPeers),
       };
     });
   },
 
   upsertRealConnections: (rows) => {
-    const { home, soundEnabled, mutedPeers } = get();
+    const {
+      home,
+      soundEnabled,
+      mutedPeers,
+      alertsEnabled,
+      seenCountries,
+      seenSshSubnets,
+    } = get();
     const now = performance.now();
     const linger = 4500;
     let newCount = 0;
     const freshEvents: TrafficEvent[] = [];
+    const freshTrails: TrailPoint[] = [];
+    let alerts = get().alerts;
+    const countries = new Set(seenCountries);
+    const sshNets = new Set(seenSshSubnets);
 
     set((s) => {
       const byId = new Map(s.connections.map((c) => [c.id, c]));
@@ -396,6 +620,18 @@ export const useConnectionStore = create<State>((set, get) => ({
             live: row.live,
             real: true,
             direction: row.direction ?? prev.direction ?? "outbound",
+            org: row.org ?? prev.org,
+            as: row.as ?? prev.as,
+            asn: row.asn ?? prev.asn,
+            process: row.process ?? prev.process,
+            pid: row.pid ?? prev.pid,
+            iface: row.iface ?? prev.iface,
+            httpPath: row.httpPath ?? prev.httpPath,
+            httpMethod: row.httpMethod ?? prev.httpMethod,
+            bytes: row.bytes ?? prev.bytes,
+            bytesPerSec: row.bytesPerSec ?? prev.bytesPerSec,
+            hostId: row.hostId ?? prev.hostId,
+            transport: row.transport ?? prev.transport,
             ttl: row.live
               ? Math.max(prev.ttl, now - prev.createdAt + 60_000)
               : now - prev.createdAt + (row.lingerMs ?? linger),
@@ -416,7 +652,8 @@ export const useConnectionStore = create<State>((set, get) => ({
             lon: row.lon,
             protocol: row.protocol,
             port: row.port,
-            bytes: 0,
+            bytes: row.bytes ?? 0,
+            bytesPerSec: row.bytesPerSec ?? 0,
             createdAt: now,
             ttl: row.live ? 60_000 : (row.lingerMs ?? linger),
             distanceKm: Math.round(
@@ -426,6 +663,16 @@ export const useConnectionStore = create<State>((set, get) => ({
             live: row.live,
             direction,
             impactAt: isNew && !muted ? now : undefined,
+            org: row.org,
+            as: row.as,
+            asn: row.asn,
+            process: row.process,
+            pid: row.pid,
+            iface: row.iface,
+            httpPath: row.httpPath,
+            httpMethod: row.httpMethod,
+            hostId: row.hostId,
+            transport: row.transport,
           });
           if (isNew && !muted) {
             if (soundEnabled) playConnectionBlip(direction, row.protocol);
@@ -439,13 +686,53 @@ export const useConnectionStore = create<State>((set, get) => ({
                 country: row.country,
                 ip: row.ip,
                 port: row.port,
+                process: row.process,
               }),
               direction,
               protocol: row.protocol,
               city: row.city,
               country: row.country,
               ip: row.ip,
+              process: row.process,
+              org: row.org,
             });
+            freshTrails.push({
+              id: `t-${row.id}-${now}`,
+              lat: row.lat,
+              lon: row.lon,
+              color: direction === "inbound" ? "#2ee6a6" : "#f59e0b",
+              born: now,
+              ttl: 28000,
+              direction,
+            });
+
+            if (alertsEnabled) {
+              if (row.country && !countries.has(row.country)) {
+                countries.add(row.country);
+                alerts = pushAlert(
+                  alerts,
+                  "info",
+                  `New country: ${row.country} (${row.city}) · ${row.ip}`,
+                );
+              }
+              const isSsh =
+                row.port === 22 ||
+                (row.protocol || "").toUpperCase().includes("SSH");
+              if (isSsh && direction === "inbound") {
+                const net = subnet24(row.ip);
+                if (!sshNets.has(net)) {
+                  sshNets.add(net);
+                  alerts = pushAlert(
+                    alerts,
+                    "danger",
+                    `SSH from new subnet ${net} · ${row.city}, ${row.country}`,
+                  );
+                }
+              }
+              if ((row.protocol || "").toUpperCase() === "DNS") {
+                // mild info — spikes handled elsewhere if needed
+              }
+            }
           }
         }
       }
@@ -461,12 +748,16 @@ export const useConnectionStore = create<State>((set, get) => ({
         return b.createdAt - a.createdAt;
       });
 
-      const sliced = merged.slice(0, 100);
+      const sliced = merged.slice(0, 120);
       const counts = recount(sliced, mutedPeers);
       const history = [
         ...s.activityHistory.slice(-31),
         counts.agentActiveCount,
       ];
+      const trails = [...freshTrails, ...s.trails]
+        .filter((t) => now - t.born < t.ttl)
+        .slice(0, 160);
+
       return {
         connections: sliced,
         totalSeen: s.totalSeen + newCount,
@@ -474,6 +765,10 @@ export const useConnectionStore = create<State>((set, get) => ({
         agentError: null,
         events: [...freshEvents, ...s.events].slice(0, 40),
         activityHistory: history,
+        trails,
+        alerts,
+        seenCountries: countries,
+        seenSshSubnets: sshNets,
         ...counts,
       };
     });
@@ -482,9 +777,16 @@ export const useConnectionStore = create<State>((set, get) => ({
   tick: (now) => {
     set((s) => {
       const next = s.connections.filter((c) => now - c.createdAt < c.ttl);
-      if (next.length === s.connections.length) return s;
+      const trails = s.trails.filter((t) => now - t.born < t.ttl);
+      if (
+        next.length === s.connections.length &&
+        trails.length === s.trails.length
+      ) {
+        return s;
+      }
       return {
         connections: next,
+        trails,
         ...recount(next, s.mutedPeers),
       };
     });
@@ -500,8 +802,11 @@ export const useConnectionStore = create<State>((set, get) => ({
       agentActiveCount: 0,
       events: [],
       selectedId: null,
+      trails: [],
       mutedPeers: s.mutedPeers,
     })),
+
+  clearAlerts: () => set({ alerts: [] }),
 }));
 
 export function connectionLife(c: Connection, now: number): number {
@@ -514,15 +819,6 @@ export function connectionLife(c: Connection, now: number): number {
   if (t < 0.08) return t / 0.08;
   if (t > 0.72) return Math.max(0, 1 - (t - 0.72) / 0.28);
   return 1;
-}
-
-export function protocolWeight(protocol: string): number {
-  const p = (protocol || "").toUpperCase();
-  if (p.includes("SSH") || p.includes("RDP")) return 1.35;
-  if (p.includes("DNS") || p.includes("PING") || p.includes("ICMP")) return 0.75;
-  if (p.includes("HTTPS") || p.includes("HTTP")) return 1.1;
-  if (p.includes("QUIC")) return 1.0;
-  return 0.95;
 }
 
 export { isIpMuted };
