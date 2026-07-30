@@ -15,19 +15,46 @@ const SURFACE = EARTH_RADIUS * 1.016;
 const COLORS = {
   inbound: {
     arc: "#047857",
-    glow: "#0369a1",
+    glow: "#0ea5e9",
     dot: "#059669",
     pulse: "#10b981",
     label: "#047857",
   },
   outbound: {
     arc: "#b45309",
-    glow: "#c2410c",
+    glow: "#f59e0b",
     dot: "#d97706",
-    pulse: "#f59e0b",
+    pulse: "#fbbf24",
     label: "#b45309",
   },
 } as const;
+
+function buildArcTube(
+  points: THREE.Vector3[],
+  color: string,
+  radius: number,
+  opacity: number,
+): THREE.Mesh {
+  const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
+  const geo = new THREE.TubeGeometry(
+    curve,
+    Math.max(24, points.length - 1),
+    radius,
+    6,
+    false,
+  );
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    depthWrite: false,
+    depthTest: true,
+    toneMapped: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 10;
+  return mesh;
+}
 
 function ConnectionArc({
   conn,
@@ -38,58 +65,41 @@ function ConnectionArc({
   homeLat: number;
   homeLon: number;
 }) {
-  const lineRef = useRef<THREE.Line | null>(null);
-  const glowRef = useRef<THREE.Line | null>(null);
+  const tubeRef = useRef<THREE.Mesh | null>(null);
+  const glowRef = useRef<THREE.Mesh | null>(null);
   const remoteRef = useRef<THREE.Mesh>(null);
   const pulseRef = useRef<THREE.Mesh>(null);
 
   const direction = conn.direction === "inbound" ? "inbound" : "outbound";
   const colors = COLORS[direction];
 
-  const { points, remotePos, line, glow } = useMemo(() => {
+  const { points, remotePos, tube, glow } = useMemo(() => {
     const remotePos = latLonToVector3(conn.lat, conn.lon, SURFACE);
     const homePos = latLonToVector3(homeLat, homeLon, SURFACE);
-    const points = createArcPoints(remotePos, homePos, EARTH_RADIUS, 64);
-    const geo = new THREE.BufferGeometry().setFromPoints(points);
-    const line = new THREE.Line(
-      geo,
-      new THREE.LineBasicMaterial({
-        color: colors.arc,
-        transparent: true,
-        opacity: 0.95,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    );
-    const glow = new THREE.Line(
-      geo.clone(),
-      new THREE.LineBasicMaterial({
-        color: colors.glow,
-        transparent: true,
-        opacity: 0.28,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    );
-    return { points, remotePos, homePos, line, glow };
+    const points = createArcPoints(remotePos, homePos, EARTH_RADIUS, 72);
+    const tube = buildArcTube(points, colors.arc, 0.006, 0.95);
+    const glow = buildArcTube(points, colors.glow, 0.014, 0.22);
+    return { points, remotePos, homePos, tube, glow };
   }, [conn.lat, conn.lon, homeLat, homeLon, colors.arc, colors.glow]);
 
   useEffect(() => {
     return () => {
-      line.geometry.dispose();
-      (line.material as THREE.Material).dispose();
+      tube.geometry.dispose();
+      (tube.material as THREE.Material).dispose();
       glow.geometry.dispose();
       (glow.material as THREE.Material).dispose();
     };
-  }, [line, glow]);
+  }, [tube, glow]);
 
   useFrame((state) => {
     const now = performance.now();
     const life = connectionLife(conn, now);
-    const mat = lineRef.current?.material as THREE.LineBasicMaterial | undefined;
-    if (mat) mat.opacity = 0.2 + life * 0.75;
-    const gmat = glowRef.current?.material as THREE.LineBasicMaterial | undefined;
-    if (gmat) gmat.opacity = 0.06 + life * 0.22;
+    const mat = tubeRef.current?.material as THREE.MeshBasicMaterial | undefined;
+    if (mat) mat.opacity = 0.35 + life * 0.6;
+    const gmat = glowRef.current?.material as
+      | THREE.MeshBasicMaterial
+      | undefined;
+    if (gmat) gmat.opacity = 0.08 + life * 0.2;
     if (remoteRef.current) {
       const m = remoteRef.current.material as THREE.MeshBasicMaterial;
       m.opacity = life;
@@ -106,7 +116,7 @@ function ConnectionArc({
       );
       pulseRef.current.position.copy(points[idx]!);
       const m = pulseRef.current.material as THREE.MeshBasicMaterial;
-      m.opacity = life * 0.85;
+      m.opacity = life * 0.9;
       pulseRef.current.scale.setScalar(0.45 + life * 0.5);
     }
   });
@@ -123,19 +133,18 @@ function ConnectionArc({
   return (
     <group>
       <primitive
-        object={line}
-        ref={(obj: THREE.Line | null) => {
-          lineRef.current = obj;
-        }}
-      />
-      <primitive
         object={glow}
-        ref={(obj: THREE.Line | null) => {
+        ref={(obj: THREE.Mesh | null) => {
           glowRef.current = obj;
         }}
       />
+      <primitive
+        object={tube}
+        ref={(obj: THREE.Mesh | null) => {
+          tubeRef.current = obj;
+        }}
+      />
 
-      {/* Core pin — tiny */}
       <mesh ref={remoteRef} position={remotePos}>
         <sphereGeometry args={[0.0055, 10, 10]} />
         <meshBasicMaterial
@@ -145,7 +154,6 @@ function ConnectionArc({
           toneMapped={false}
         />
       </mesh>
-      {/* Soft halo */}
       <mesh position={remotePos}>
         <sphereGeometry args={[0.011, 10, 10]} />
         <meshBasicMaterial
@@ -158,7 +166,7 @@ function ConnectionArc({
       </mesh>
 
       <mesh ref={pulseRef}>
-        <sphereGeometry args={[0.004, 8, 8]} />
+        <sphereGeometry args={[0.0045, 8, 8]} />
         <meshBasicMaterial
           color={colors.pulse}
           transparent

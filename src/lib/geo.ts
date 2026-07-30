@@ -16,7 +16,10 @@ export function latLonToVector3(
   return new THREE.Vector3(x, y, z);
 }
 
-/** Great-circle-ish elevated arc between two surface points (low fly). */
+/**
+ * Great-circle arc between two surface points.
+ * Low trajectory (hugs the globe) but always clears the surface.
+ */
 export function createArcPoints(
   start: THREE.Vector3,
   end: THREE.Vector3,
@@ -26,16 +29,35 @@ export function createArcPoints(
   const points: THREE.Vector3[] = [];
   const startN = start.clone().normalize();
   const endN = end.clone().normalize();
-  const angle = startN.angleTo(endN);
-  const dist = Math.max(angle, 0.05);
-  // Low, tight arcs — short hops barely lift; long hauls still modest
-  const altitude = radius * (0.025 + Math.min(dist / Math.PI, 1) * 0.09);
+
+  // Spherical linear interpolation for a true great-circle path
+  let omega = startN.angleTo(endN);
+  if (omega < 1e-4) {
+    // Nearly same point — tiny loop so something still draws
+    omega = 0.02;
+  }
+
+  // Base sits just above the sphere so endpoints don't clip
+  const base = radius * 1.012;
+  // Low fly: peak lift is modest (was nearly invisible at 2.5%)
+  const altitude = radius * (0.045 + Math.min(omega / Math.PI, 1) * 0.11);
+
+  const sinOmega = Math.sin(omega);
 
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
-    const p = new THREE.Vector3().lerpVectors(startN, endN, t).normalize();
+    let p: THREE.Vector3;
+    if (sinOmega < 1e-5) {
+      p = startN.clone().lerp(endN, t).normalize();
+    } else {
+      const a = Math.sin((1 - t) * omega) / sinOmega;
+      const b = Math.sin(t * omega) / sinOmega;
+      p = startN.clone().multiplyScalar(a).add(endN.clone().multiplyScalar(b));
+      p.normalize();
+    }
+    // Smooth lift that peaks mid-arc (low trajectory)
     const lift = Math.sin(t * Math.PI) * altitude;
-    p.multiplyScalar(radius + lift);
+    p.multiplyScalar(base + lift);
     points.push(p);
   }
   return points;
