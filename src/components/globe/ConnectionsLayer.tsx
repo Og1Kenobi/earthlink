@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Html, Line } from "@react-three/drei";
+import { Line } from "@react-three/drei";
 import * as THREE from "three";
 import {
   connectionLife,
@@ -18,14 +18,12 @@ const COLORS = {
     glow: "#22d3ee",
     dot: "#059669",
     pulse: "#34d399",
-    label: "#047857",
   },
   outbound: {
     arc: "#ea580c",
     glow: "#fbbf24",
     dot: "#d97706",
     pulse: "#fcd34d",
-    label: "#b45309",
   },
 } as const;
 
@@ -49,12 +47,10 @@ function ConnectionArc({
   const { points, remotePos } = useMemo(() => {
     const remotePos = latLonToVector3(conn.lat, conn.lon, SURFACE);
     const homePos = latLonToVector3(homeLat, homeLon, SURFACE);
-    // true low great-circle arc that clears the sphere
     const points = createArcPoints(remotePos, homePos, EARTH_RADIUS, 80);
     return { points, remotePos, homePos };
   }, [conn.lat, conn.lon, homeLat, homeLon]);
 
-  // drei Line wants a mutable array of Vector3 | tuples
   const linePoints = useMemo(
     () => points.map((p) => p.toArray() as [number, number, number]),
     [points],
@@ -64,13 +60,15 @@ function ConnectionArc({
     const now = performance.now();
     const life = connectionLife(conn, now);
 
-    // Fade fat lines via group visibility/scale-ish opacity on materials
     const applyOpacity = (group: THREE.Group | null, opacity: number) => {
       if (!group) return;
       group.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
         if (mesh.material && "opacity" in mesh.material) {
-          const m = mesh.material as THREE.Material & { opacity: number; transparent: boolean };
+          const m = mesh.material as THREE.Material & {
+            opacity: number;
+            transparent: boolean;
+          };
           m.transparent = true;
           m.opacity = opacity;
           m.depthWrite = false;
@@ -101,18 +99,8 @@ function ConnectionArc({
     }
   });
 
-  const label = conn.city
-    ? `${conn.city}${conn.country ? `, ${conn.country}` : ""}`
-    : conn.ip;
-
-  const labelPos = useMemo(
-    () => remotePos.clone().multiplyScalar(1.04),
-    [remotePos],
-  );
-
   return (
     <group>
-      {/* Soft outer glow stroke */}
       <group ref={glowRef} renderOrder={9}>
         <Line
           points={linePoints}
@@ -125,7 +113,6 @@ function ConnectionArc({
           toneMapped={false}
         />
       </group>
-      {/* Core arc — fat enough to read on the political map */}
       <group ref={lineRef} renderOrder={10}>
         <Line
           points={linePoints}
@@ -168,46 +155,14 @@ function ConnectionArc({
           toneMapped={false}
         />
       </mesh>
-
-      <Html
-        position={labelPos}
-        center
-        sprite
-        distanceFactor={7}
-        occlude={false}
-        style={{ pointerEvents: "none" }}
-        zIndexRange={[40, 0]}
-      >
-        <div
-          className="city-pin"
-          style={{
-            color: colors.label,
-            borderColor: colors.dot,
-          }}
-        >
-          <span className="city-pin-dir">
-            {direction === "inbound" ? "↓ IN" : "↑ OUT"}
-          </span>
-          <span className="city-pin-name">{label}</span>
-        </div>
-      </Html>
     </group>
   );
 }
 
-function HomeBeacon({
-  lat,
-  lon,
-  label,
-}: {
-  lat: number;
-  lon: number;
-  label: string;
-}) {
+function HomeBeacon({ lat, lon }: { lat: number; lon: number }) {
   const core = useRef<THREE.Mesh>(null);
   const ring = useRef<THREE.Mesh>(null);
   const pos = useMemo(() => latLonToVector3(lat, lon, SURFACE), [lat, lon]);
-  const labelPos = useMemo(() => pos.clone().multiplyScalar(1.05), [pos]);
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
@@ -228,46 +183,27 @@ function HomeBeacon({
     return q;
   }, [pos]);
 
-  const shortLabel =
-    label.length > 28 ? `${label.slice(0, 26)}…` : label || "Home";
-
   return (
-    <group>
-      <group position={pos} quaternion={quat}>
-        <mesh ref={core} renderOrder={11}>
-          <sphereGeometry args={[0.014, 14, 14]} />
-          <meshBasicMaterial
-            color="#2563eb"
-            transparent
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
-        <mesh ref={ring} rotation={[Math.PI / 2, 0, 0]} renderOrder={11}>
-          <ringGeometry args={[0.016, 0.026, 36]} />
-          <meshBasicMaterial
-            color="#2563eb"
-            transparent
-            side={THREE.DoubleSide}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
-      </group>
-      <Html
-        position={labelPos}
-        center
-        sprite
-        distanceFactor={7}
-        occlude={false}
-        style={{ pointerEvents: "none" }}
-        zIndexRange={[50, 0]}
-      >
-        <div className="city-pin city-pin-home">
-          <span className="city-pin-dir">HOME</span>
-          <span className="city-pin-name">{shortLabel}</span>
-        </div>
-      </Html>
+    <group position={pos} quaternion={quat}>
+      <mesh ref={core} renderOrder={11}>
+        <sphereGeometry args={[0.014, 14, 14]} />
+        <meshBasicMaterial
+          color="#2563eb"
+          transparent
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+      <mesh ref={ring} rotation={[Math.PI / 2, 0, 0]} renderOrder={11}>
+        <ringGeometry args={[0.016, 0.026, 36]} />
+        <meshBasicMaterial
+          color="#2563eb"
+          transparent
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
     </group>
   );
 }
@@ -291,7 +227,7 @@ export function ConnectionsLayer() {
 
   return (
     <group>
-      <HomeBeacon lat={home.lat} lon={home.lon} label={home.label} />
+      <HomeBeacon lat={home.lat} lon={home.lon} />
       {visible.map((c) => (
         <ConnectionArc
           key={c.id}
