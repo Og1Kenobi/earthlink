@@ -981,7 +981,18 @@ export function Hud() {
             <ul className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5 [scrollbar-width:thin]">
               {filtered.length === 0 ? (
                 <li className="px-2 py-6 text-center text-xs text-muted">
-                  No visible connections
+                  {selectedAgentId
+                    ? `No connections for ${selectedAgentId}`
+                    : "No visible connections"}
+                  {selectedAgentId && (
+                    <button
+                      type="button"
+                      className="mt-2 block w-full font-mono text-[10px] text-accent hover:underline"
+                      onClick={() => setSelectedAgentId(null)}
+                    >
+                      Show all agents
+                    </button>
+                  )}
                 </li>
               ) : (
                 filtered.slice(0, 48).map((c) => {

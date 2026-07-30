@@ -1,6 +1,6 @@
 /** In-memory IP → geo cache (survives process lifetime). */
 const cache = new Map();
-const NEGATIVE_TTL_MS = 30 * 60 * 1000;
+const NEGATIVE_TTL_MS = 5 * 60 * 1000; // short — rate-limits recover
 const POSITIVE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function now() {
@@ -21,9 +21,45 @@ export function setCache(ip, value, ttl = POSITIVE_TTL_MS) {
   cache.set(ip, { value, expiresAt: now() + ttl });
 }
 
+function isPrivateIp(ip) {
+  if (!ip) return true;
+  if (ip === "127.0.0.1" || ip === "::1") return true;
+  if (ip.startsWith("10.")) return true;
+  if (ip.startsWith("192.168.")) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) return true;
+  if (ip.startsWith("169.254.")) return true;
+  if (ip.includes(":")) {
+    const lower = ip.toLowerCase();
+    return (
+      lower.startsWith("fc") ||
+      lower.startsWith("fd") ||
+      lower.startsWith("fe80")
+    );
+  }
+  return false;
+}
+
+function geoFromIpApi(data) {
+  if (!data || data.status !== "success" || data.lat == null || data.lon == null) {
+    return null;
+  }
+  const asnMatch = /^AS(\d+)/i.exec(data.as || "");
+  return {
+    lat: data.lat,
+    lon: data.lon,
+    city: data.city || data.regionName || "Unknown",
+    region: data.regionName || "",
+    country: data.countryCode || data.country || "??",
+    private: false,
+    org: data.org || data.asname || data.isp || null,
+    as: data.as || null,
+    asn: asnMatch ? asnMatch[1] : null,
+    isp: data.isp || null,
+  };
+}
+
 /**
  * Lookup a single public IP. Returns null for private / failed.
- * Includes ASN/org when the provider supplies it.
  */
 export async function lookupIp(ip) {
   if (!ip) return null;
@@ -32,13 +68,7 @@ export async function lookupIp(ip) {
     return cached === false ? null : cached;
   }
 
-  // Private — synthetic LAN marker
-  if (
-    ip === "127.0.0.1" ||
-    ip.startsWith("10.") ||
-    ip.startsWith("192.168.") ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)
-  ) {
+  if (isPrivateIp(ip)) {
     const lan = {
       lat: null,
       lon: null,
@@ -56,38 +86,28 @@ export async function lookupIp(ip) {
   }
 
   try {
-    // ip-api free tier: non-HTTPS, 45 req/min — includes as/org/isp
     const url = `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,country,countryCode,regionName,city,lat,lon,query,as,org,isp,asname`;
     const res = await fetch(url, {
       signal: AbortSignal.timeout(5000),
       headers: { Accept: "application/json" },
     });
+    if (res.status === 429) {
+      // rate limited — do NOT long-negative-cache
+      return null;
+    }
     if (!res.ok) {
       setCache(ip, false, NEGATIVE_TTL_MS);
       return null;
     }
     const data = await res.json();
-    if (data.status !== "success" || data.lat == null || data.lon == null) {
+    const geo = geoFromIpApi(data);
+    if (!geo) {
       setCache(ip, false, NEGATIVE_TTL_MS);
       return null;
     }
-    const asnMatch = /^AS(\d+)/i.exec(data.as || "");
-    const geo = {
-      lat: data.lat,
-      lon: data.lon,
-      city: data.city || data.regionName || "Unknown",
-      region: data.regionName || "",
-      country: data.countryCode || data.country || "??",
-      private: false,
-      org: data.org || data.asname || data.isp || null,
-      as: data.as || null,
-      asn: asnMatch ? asnMatch[1] : null,
-      isp: data.isp || null,
-    };
     setCache(ip, geo, POSITIVE_TTL_MS);
     return geo;
   } catch {
-    // Fallback provider
     try {
       const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`, {
         signal: AbortSignal.timeout(5000),
@@ -124,23 +144,79 @@ export async function lookupIp(ip) {
   }
 }
 
-/** Batch lookup with simple concurrency limit. */
-export async function lookupMany(ips, concurrency = 4) {
+/**
+ * Batch lookup. Uses ip-api.com/batch (up to 100) when possible so agent
+ * ingest of 50–100 sockets does not get rate-limited to nothing.
+ */
+export async function lookupMany(ips, concurrency = 6) {
   const unique = [...new Set(ips.filter(Boolean))];
   const result = new Map();
-  let i = 0;
-  async function worker() {
-    while (i < unique.length) {
-      const idx = i++;
-      const ip = unique[idx];
-      result.set(ip, await lookupIp(ip));
+  const needFetch = [];
+
+  for (const ip of unique) {
+    if (isPrivateIp(ip)) {
+      const lan = await lookupIp(ip);
+      result.set(ip, lan);
+      continue;
+    }
+    const cached = getCached(ip);
+    if (cached !== null && cached !== undefined) {
+      result.set(ip, cached === false ? null : cached);
+    } else {
+      needFetch.push(ip);
     }
   }
-  const workers = Array.from(
-    { length: Math.min(concurrency, unique.length || 1) },
-    () => worker(),
-  );
-  await Promise.all(workers);
+
+  // Batch in chunks of 100
+  for (let offset = 0; offset < needFetch.length; offset += 100) {
+    const chunk = needFetch.slice(offset, offset + 100);
+    try {
+      const res = await fetch("http://ip-api.com/batch?fields=status,message,country,countryCode,regionName,city,lat,lon,query,as,org,isp,asname", {
+        method: "POST",
+        headers: { "content-type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(chunk.map((query) => ({ query }))),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (res.ok) {
+        const arr = await res.json();
+        if (Array.isArray(arr)) {
+          for (let i = 0; i < chunk.length; i++) {
+            const ip = chunk[i];
+            const data = arr[i];
+            const geo = geoFromIpApi(data);
+            if (geo) {
+              setCache(ip, geo, POSITIVE_TTL_MS);
+              result.set(ip, geo);
+            } else {
+              // soft fail — leave uncached so next poll retries
+              result.set(ip, null);
+            }
+          }
+          continue;
+        }
+      }
+    } catch {
+      // fall through to sequential
+    }
+
+    // Sequential fallback with low concurrency
+    let i = 0;
+    async function worker() {
+      while (i < chunk.length) {
+        const idx = i++;
+        const ip = chunk[idx];
+        if (result.has(ip)) continue;
+        result.set(ip, await lookupIp(ip));
+      }
+    }
+    await Promise.all(
+      Array.from(
+        { length: Math.min(concurrency, chunk.length || 1) },
+        () => worker(),
+      ),
+    );
+  }
+
   return result;
 }
 

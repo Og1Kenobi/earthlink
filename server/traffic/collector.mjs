@@ -205,7 +205,26 @@ export function createTrafficCollector(options = {}) {
       if (!includePrivate) return null;
       g = privateGeoNearHome(s.remoteIp, home);
     } else if (!g || g.lat == null || g.lon == null) {
-      return null;
+      // Still show the peer near home so agent filters aren't empty when geo lags
+      const baseLat = home?.lat ?? 0;
+      const baseLon = home?.lon ?? 0;
+      let h = 0;
+      const ip = s.remoteIp || "";
+      for (let i = 0; i < ip.length; i++) h = (h * 33 + ip.charCodeAt(i)) | 0;
+      const a = ((h % 360) + 360) % 360;
+      const rad = (a * Math.PI) / 180;
+      g = {
+        lat: baseLat + Math.sin(rad) * 0.35,
+        lon: baseLon + Math.cos(rad) * 0.35,
+        city: "Unresolved",
+        country: "??",
+        region: "",
+        private: false,
+        org: null,
+        as: null,
+        asn: null,
+        isp: null,
+      };
     }
 
     const proc = resolveProcess(s, processMap);
@@ -226,16 +245,19 @@ export function createTrafficCollector(options = {}) {
       existing.transport = s.transport || "tcp";
       existing.process = s.process || proc?.process || existing.process || null;
       existing.pid = s.pid ?? proc?.pid ?? existing.pid ?? null;
-      existing.org = g.org ?? existing.org;
-      existing.as = g.as ?? existing.as;
-      existing.asn = g.asn ?? existing.asn;
-      existing.isp = g.isp ?? existing.isp;
+      // Prefer real geo over "Unresolved" placeholders
+      if (g.city !== "Unresolved" || existing.city === "Unresolved" || !existing.city) {
+        existing.org = g.org ?? existing.org;
+        existing.as = g.as ?? existing.as;
+        existing.asn = g.asn ?? existing.asn;
+        existing.isp = g.isp ?? existing.isp;
+        existing.city = g.city;
+        existing.country = g.country;
+        existing.lat = g.lat;
+        existing.lon = g.lon;
+      }
       existing.iface = s.iface ?? existing.iface;
       existing.isPrivate = isPriv;
-      existing.city = g.city;
-      existing.country = g.country;
-      existing.lat = g.lat;
-      existing.lon = g.lon;
       existing.hostId = hostId;
       existing.os = os;
       existing.bytes = Math.max(existing.bytes || 0, bytes);

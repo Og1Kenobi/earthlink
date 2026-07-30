@@ -404,13 +404,34 @@ export function matchesSecurityPreset(
 
 /** Filter globe/list to one edge agent (or hub). null = all. */
 export function matchesAgentFilter(
-  c: { hostId?: string | null },
+  c: { hostId?: string | null; id?: string },
   selectedAgentId: string | null,
   hubHostId?: string | null,
 ): boolean {
   if (!selectedAgentId) return true;
-  const hid = c.hostId || hubHostId || "local";
-  return hid === selectedAgentId;
+  const want = selectedAgentId.trim().toLowerCase();
+
+  // Prefer explicit hostId
+  if (c.hostId) {
+    if (c.hostId.trim().toLowerCase() === want) return true;
+  }
+
+  // Connection ids are `${hostId}|transport|ip|…`
+  if (c.id) {
+    const pipe = c.id.indexOf("|");
+    if (pipe > 0) {
+      const prefix = c.id.slice(0, pipe).trim().toLowerCase();
+      if (prefix === want) return true;
+    }
+  }
+
+  // Only fall back to hub id when the row has no host markers at all
+  if (!c.hostId && !c.id) {
+    const hub = (hubHostId || "local").trim().toLowerCase();
+    return hub === want;
+  }
+
+  return false;
 }
 
 
@@ -748,6 +769,11 @@ export const useConnectionStore = create<State>((set, get) => ({
             os: row.os ?? prev.os,
             transport: row.transport ?? prev.transport,
             isPrivate: row.isPrivate ?? prev.isPrivate,
+            // derive hostId from id prefix if still missing
+            ...(!(row.hostId ?? prev.hostId) && row.id?.includes("|")
+              ? { hostId: row.id.split("|")[0] }
+              : {}),
+
             ttl: row.live
               ? Math.max(prev.ttl, now - prev.createdAt + 60_000)
               : now - prev.createdAt + (row.lingerMs ?? linger),
@@ -787,10 +813,13 @@ export const useConnectionStore = create<State>((set, get) => ({
             iface: row.iface,
             httpPath: row.httpPath,
             httpMethod: row.httpMethod,
-            hostId: row.hostId,
+            hostId:
+              row.hostId ||
+              (row.id?.includes("|") ? row.id.split("|")[0] : undefined),
             os: row.os,
             transport: row.transport,
             isPrivate: row.isPrivate,
+
           });
           if (isNew && !muted) {
             if (soundEnabled) playConnectionBlip(direction, row.protocol);
