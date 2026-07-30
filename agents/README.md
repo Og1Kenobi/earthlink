@@ -4,12 +4,14 @@ Push live sockets from **Linux**, **macOS**, or **Windows** into an Earthlink hu
 
 **Full instructions (all OS):** [docs/AGENTS.md](../docs/AGENTS.md)
 
-## Quick start
+## Quick start (same LAN as hub)
+
+Use the hub’s **internal** IP (example `10.11.12.62`):
 
 ```bash
-export EARTHLINK_HUB=http://HUB_IP:8080
+export EARTHLINK_HUB=http://10.11.12.62:8080
 export EARTHLINK_HOST_ID=my-machine
-export EARTHLINK_AGENT_TOKEN=change-me   # if hub requires it
+# export EARTHLINK_AGENT_TOKEN=change-me
 ```
 
 | OS | Command |
@@ -20,4 +22,11 @@ export EARTHLINK_AGENT_TOKEN=change-me   # if hub requires it
 | Windows (CMD) | `agents\run-windows.cmd` |
 | Any | `npm run agent` / `node agents/earthlink-agent.mjs` |
 
-Always-on: systemd (Linux), launchd (macOS), Task Scheduler / NSSM (Windows) — see [docs/AGENTS.md](../docs/AGENTS.md).
+Success:
+
+```text
+[earthlink-agent] … → http://10.11.12.62:8080/api/traffic/ingest as my-machine
+[earthlink-agent] pushed N sockets · agents=…
+```
+
+Always-on: systemd (Linux), launchd (macOS), Task Scheduler (Windows) — see [docs/AGENTS.md](../docs/AGENTS.md).

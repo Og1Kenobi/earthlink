@@ -13,6 +13,8 @@ You can run:
 
 Agents guide: **[docs/AGENTS.md](./docs/AGENTS.md)**
 
+> **LAN tip:** machines on the same network should set `EARTHLINK_HUB=http://HUB_LAN_IP:8080` (not the public WAN IP). See docs/AGENTS.md → *LAN vs public IP*.
+
 ---
 
 ## Requirements (hub)

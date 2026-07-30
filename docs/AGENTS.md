@@ -44,6 +44,43 @@ brew install node@22
 
 ---
 
+## LAN vs public IP (read this)
+
+Agents must reach the hub over a path that works from *that* machine:
+
+| Where the agent is | Set `EARTHLINK_HUB` to |
+| --- | --- |
+| Same LAN as hub | **Internal IP** — e.g. `http://10.11.12.62:8080` |
+| Off-site / remote internet | Public IP or DNS — e.g. `http://75.x.x.x:8080` (firewall open) |
+| Anywhere via VPN | VPN address of the hub |
+
+**Symptom:** `push failed: … timeout` while `curl` to the public IP is slow or hangs  
+**Fix:** switch to the hub’s LAN IP when you are on the same network.
+
+```powershell
+# Windows on the LAN
+$env:EARTHLINK_HUB = "http://10.11.12.62:8080"
+$env:EARTHLINK_HOST_ID = "desktop-win"
+.\agents\run-windows.ps1
+```
+
+```bash
+# Linux on the LAN
+export EARTHLINK_HUB=http://10.11.12.62:8080
+export EARTHLINK_HOST_ID=ubuntuopti001
+bash agents/run-linux.sh
+```
+
+Find the hub LAN IP on the hub host:
+
+```bash
+hostname -I
+# or: ip -4 addr
+```
+
+
+---
+
 ## Shared environment variables
 
 Set these on **every edge agent**:
@@ -454,6 +491,8 @@ Lists hub + remotes (`hostId`, `os`, `osLabel`, `socketCount`, `stale`, `lastSee
 | Windows: few process names | Run elevated or accept `netstat` without names |
 | macOS: empty process | Normal without `lsof` rights; sockets still work |
 | Linux: no DNS/ping | Install `conntrack` + sudoers (above) |
+| Linux: `sudo` auth spam in journal | `export EARTHLINK_SKIP_CONNTRACK_SUDO=1` or NOPASSWD conntrack |
+| `push failed` timeout on LAN | Use hub **LAN** IP, not public WAN IP |
 | Duplicate host in UI | Give each agent a unique `EARTHLINK_HOST_ID` |
 
 ---

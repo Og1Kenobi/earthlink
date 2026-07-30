@@ -4,7 +4,7 @@
 
 Self-host on your server: every public TCP / UDP / DNS / ping peer lights up as a pin and arc to your home location, hangs around, then fades. Inbound is green, outbound is amber.
 
-**Agents for Linux, macOS, and Windows** — run a hub on one machine and optional edge agents on others.
+**Agents for Linux, macOS, and Windows** — run a hub on one machine and optional edge agents on others. Same LAN? Point agents at the hub’s **private IP**. Off-site? Use the public IP or VPN.
 
 <p align="center">
   <img src="docs/screenshots/desktop-globe.png" alt="Earthlink desktop — NOC globe with live traffic" width="100%" />
@@ -12,13 +12,17 @@ Self-host on your server: every public TCP / UDP / DNS / ping peer lights up as 
 
 | Desktop | Mobile |
 | --- | --- |
-| <img src="docs/screenshots/desktop-filtered.png" alt="Earthlink with spin presets and panels" /> | <img src="docs/screenshots/mobile.png" alt="Earthlink on mobile" /> |
+| <img src="docs/screenshots/desktop-filtered.png" alt="Earthlink wider Connections panel, spin, agents" /> | <img src="docs/screenshots/mobile.png" alt="Earthlink on mobile" /> |
 
 ---
 
-## Deploy on a remote Linux server
+## Deploy
 
-**Full guide:** **[INSTALL.md](./INSTALL.md)** · **Agents:** **[docs/AGENTS.md](./docs/AGENTS.md)**
+| Doc | Contents |
+| --- | --- |
+| **[INSTALL.md](./INSTALL.md)** | Linux hub, systemd, firewall, env, conntrack |
+| **[docs/AGENTS.md](./docs/AGENTS.md)** | Edge agents on **Linux · macOS · Windows** (scripts, boot, LAN tips) |
+| **[agents/](./agents/)** | Helper runners (`run-linux.sh`, `run-macos.sh`, `run-windows.ps1`) |
 
 ### Hub (globe + this machine’s traffic)
 
@@ -28,33 +32,32 @@ cd earthlink
 npm install
 npm run build
 
-export EARTHLINK_AGENT_TOKEN=change-me
 export EARTHLINK_HOST_ID=hub-linux
+# export EARTHLINK_AGENT_TOKEN=change-me   # recommended if agents join
 HOST=0.0.0.0 PORT=8080 npm start
 ```
 
 Open `http://YOUR_SERVER:8080` — badge should read **LIVE**.
 
-### Edge agent (another Linux box)
+### Edge agents (no build)
 
-```bash
-git clone https://github.com/Og1Kenobi/earthlink.git
-cd earthlink
-# no build needed for agent-only
+**Important:** from another machine on the **same LAN**, use the hub’s **internal** address  
+(e.g. `http://10.11.12.62:8080`). The public WAN IP often times out or hairpins.
 
-export EARTHLINK_HUB=http://HUB_IP:8080
-export EARTHLINK_HOST_ID=edge-linux-1
-export EARTHLINK_AGENT_TOKEN=change-me
-npm run agent
+| OS | Quick start |
+| --- | --- |
+| **Linux** | `export EARTHLINK_HUB=http://10.11.12.62:8080` · `bash agents/run-linux.sh` · systemd |
+| **macOS** | same env · `bash agents/run-macos.sh` · launchd |
+| **Windows** | `$env:EARTHLINK_HUB="http://10.11.12.62:8080"` · `.\agents\run-windows.ps1` · Task Scheduler |
+
+Success looks like:
+
+```text
+[earthlink-agent] Windows → http://10.11.12.62:8080/api/traffic/ingest as desktop-win
+[earthlink-agent] pushed 60 sockets · agents=3
 ```
 
-| OS | Local hub collector | Edge agent |
-| --- | --- | --- |
-| **Linux** | `/proc` · `ss` · `conntrack` | `bash agents/run-linux.sh` · systemd |
-| **macOS** | `netstat` · `lsof` | `bash agents/run-macos.sh` · launchd |
-| **Windows** | `netstat -ano` · `tasklist` | `.\agents\run-windows.ps1` · Task Scheduler |
-
-**Full agent deploy (all OS):** **[docs/AGENTS.md](./docs/AGENTS.md)** · helpers in [`agents/`](./agents/)
+Globe → **Traffic → Agents** lists each host (hub + remotes).
 
 ---
 
@@ -65,7 +68,7 @@ npm run agent
 | **Top-left** | Brand, LIVE, sparkline, security presets, **globe spin** (Off→Turbo) |
 | **Top-right** | Kiosk · replay · LAN · alerts · mute · sound · tools |
 | **Left stack** | Traffic (+ Internal IPs + **Agents**) · Talkers · Alerts · Home · Muted |
-| **Right** | Connections + filter |
+| **Right** | **Connections** (wide panel) + filter |
 | **Bottom** | Auto-scrolling feed marquee |
 
 ---
@@ -73,7 +76,7 @@ npm run agent
 ## Features
 
 - **Real host traffic** — OS-native collectors (Linux / macOS / Windows)
-- **Remote agents** — push sockets into one hub (`POST /api/traffic/ingest`)
+- **Remote multi-OS agents** — push into one hub (`POST /api/traffic/ingest`)
 - **Inbound + outbound** — green in, amber out
 - **Process names** · **ASN / org** · bandwidth arcs · heat trails
 - **Security presets** · **spin speed** · **mute** · **LAN toggle**
@@ -99,6 +102,12 @@ HOST=0.0.0.0 PORT=8080 npm start
 sudo apt install -y conntrack
 echo 'YOUR_USER ALL=(root) NOPASSWD: /usr/sbin/conntrack' | sudo tee /etc/sudoers.d/earthlink-conntrack
 sudo chmod 440 /etc/sudoers.d/earthlink-conntrack
+```
+
+Or skip sudo probes entirely:
+
+```bash
+export EARTHLINK_SKIP_CONNTRACK_SUDO=1
 ```
 
 ---
@@ -128,4 +137,4 @@ npm run typecheck
 
 Stack: React 19, Vite, TanStack Start, Three.js / R3F, Tailwind v4.
 
-Screenshots: [`docs/screenshots/`](./docs/screenshots/).
+Screenshots: [`docs/screenshots/`](./docs/screenshots/) (refreshed with current UI).
