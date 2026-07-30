@@ -3,6 +3,7 @@ import {
   Activity,
   ArrowDownLeft,
   ArrowUpRight,
+  ChevronDown,
   Crosshair,
   Globe2,
   MapPin,
@@ -13,7 +14,10 @@ import {
   Trash2,
   Zap,
 } from "lucide-react";
-import { useConnectionStore } from "@/lib/connection-store";
+import {
+  useConnectionStore,
+  type Connection,
+} from "@/lib/connection-store";
 import { refreshHomeLocation } from "@/components/HomeLocator";
 
 function formatBytes(n: number): string {
@@ -46,6 +50,52 @@ function sourceBlurb(source: string, accuracyM?: number): string {
   }
 }
 
+/** Built-in filters + dynamic protocol keys as `proto:DNS` etc. */
+type ConnFilter =
+  | "all"
+  | "live"
+  | "inbound"
+  | "outbound"
+  | "proto:DNS"
+  | "proto:PING"
+  | "proto:HTTPS"
+  | "proto:HTTP"
+  | "proto:SSH"
+  | "proto:NTP"
+  | "proto:QUIC"
+  | string;
+
+const STATIC_FILTERS: { value: ConnFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "live", label: "Live only" },
+  { value: "inbound", label: "Inbound" },
+  { value: "outbound", label: "Outbound" },
+  { value: "proto:DNS", label: "DNS" },
+  { value: "proto:PING", label: "Ping" },
+  { value: "proto:HTTPS", label: "HTTPS" },
+  { value: "proto:HTTP", label: "HTTP" },
+  { value: "proto:SSH", label: "SSH" },
+  { value: "proto:NTP", label: "NTP" },
+  { value: "proto:QUIC", label: "QUIC" },
+];
+
+function matchesFilter(c: Connection, filter: ConnFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "live") return c.live !== false;
+  if (filter === "inbound") return c.direction === "inbound";
+  if (filter === "outbound") return c.direction !== "inbound";
+  if (filter.startsWith("proto:")) {
+    const want = filter.slice(6).toUpperCase();
+    const p = (c.protocol || "").toUpperCase();
+    if (want === "HTTP") return p === "HTTP" || p.startsWith("HTTP/");
+    if (want === "HTTPS") return p === "HTTPS" || p.includes("HTTPS");
+    if (want === "DNS") return p === "DNS" || p.includes("DNS");
+    if (want === "PING") return p === "PING" || p === "ICMP";
+    return p === want || p.startsWith(want);
+  }
+  return true;
+}
+
 export function Hud() {
   const home = useConnectionStore((s) => s.home);
   const homeReady = useConnectionStore((s) => s.homeReady);
@@ -67,6 +117,7 @@ export function Hud() {
 
   const [now, setNow] = useState(() => performance.now());
   const [locating, setLocating] = useState(false);
+  const [connFilter, setConnFilter] = useState<ConnFilter>("all");
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(performance.now()), 200);
@@ -84,6 +135,42 @@ export function Hud() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 4);
   }, [connections]);
+
+  /** Protocols currently in the list → extra dropdown options */
+  const filterOptions = useMemo(() => {
+    const seen = new Set(STATIC_FILTERS.map((f) => f.value));
+    const opts = [...STATIC_FILTERS];
+    const protos = new Map<string, number>();
+    for (const c of connections) {
+      const p = (c.protocol || "TCP").trim();
+      if (!p) continue;
+      protos.set(p, (protos.get(p) ?? 0) + 1);
+    }
+    const extra = [...protos.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 16);
+    for (const [p, n] of extra) {
+      const value = `proto:${p}` as ConnFilter;
+      if (seen.has(value) || seen.has(`proto:${p.toUpperCase()}`)) continue;
+      // skip if already covered by static (case-insensitive)
+      const upper = p.toUpperCase();
+      if (
+        STATIC_FILTERS.some(
+          (f) => f.value === `proto:${upper}` || f.label.toUpperCase() === upper,
+        )
+      ) {
+        continue;
+      }
+      seen.add(value);
+      opts.push({ value, label: `${p} (${n})` });
+    }
+    return opts;
+  }, [connections]);
+
+  const filteredConnections = useMemo(
+    () => connections.filter((c) => matchesFilter(c, connFilter)),
+    [connections, connFilter],
+  );
 
   const onRelocate = async () => {
     setLocating(true);
@@ -120,7 +207,7 @@ export function Hud() {
           </div>
           <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted sm:text-sm">
             {mode === "real"
-              ? "Tech map · borders on · city labels on each hit (green in, amber out)."
+              ? "Tech map · TCP, UDP/DNS, ping · green in, amber out."
               : mode === "connecting"
                 ? "Connecting to the traffic agent on this server…"
                 : "Demo traffic (agent offline). Install on your server for real sockets."}
@@ -316,9 +403,35 @@ export function Hud() {
 
         <aside className="pointer-events-auto hidden w-[min(100%,18rem)] flex-col self-stretch md:flex">
           <div className="panel-glass flex h-full min-h-0 max-h-[min(82vh,46rem)] flex-1 flex-col rounded-xl">
-            <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3 text-xs font-medium uppercase tracking-wider text-faint">
-              <Radio className="size-3.5 text-primary" />
-              Connections
+            <div className="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-3 sm:px-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-faint">
+                  <Radio className="size-3.5 text-primary" />
+                  Connections
+                </div>
+                <span className="font-mono text-[10px] tabular-nums text-muted">
+                  {filteredConnections.length}
+                  {connFilter !== "all" ? ` / ${connections.length}` : ""}
+                </span>
+              </div>
+              <label className="relative block">
+                <span className="sr-only">Filter connections</span>
+                <select
+                  value={connFilter}
+                  onChange={(e) => setConnFilter(e.target.value as ConnFilter)}
+                  className="h-9 w-full appearance-none rounded-lg border border-border bg-surface-elevated py-1.5 pl-3 pr-8 font-mono text-[11px] text-fg outline-none transition hover:border-border-strong focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+                >
+                  {filterOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint"
+                  aria-hidden
+                />
+              </label>
             </div>
             <ul className="min-h-0 flex-1 space-y-0 overflow-y-auto overscroll-contain px-2 py-2">
               {connections.length === 0 ? (
@@ -327,8 +440,19 @@ export function Hud() {
                     ? "No public remote sockets right now — waiting…"
                     : "Waiting for traffic…"}
                 </li>
+              ) : filteredConnections.length === 0 ? (
+                <li className="px-2 py-6 text-center text-xs text-muted">
+                  No connections match this filter.
+                  <button
+                    type="button"
+                    onClick={() => setConnFilter("all")}
+                    className="mt-2 block w-full text-[11px] text-primary underline-offset-2 hover:underline"
+                  >
+                    Show all
+                  </button>
+                </li>
               ) : (
-                connections.slice(0, 48).map((c) => {
+                filteredConnections.slice(0, 48).map((c) => {
                   const age = now - c.createdAt;
                   const remaining = Math.max(0, c.ttl - age);
                   const inbound = c.direction === "inbound";
@@ -393,12 +517,32 @@ export function Hud() {
       </div>
 
       <div className="pointer-events-auto panel-glass rounded-xl md:hidden">
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-faint">
-          <Radio className="size-3 text-primary" />
-          Recent · In {inboundCount} · Out {outboundCount}
+        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+          <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-faint">
+            <Radio className="size-3 text-primary" />
+            Recent · In {inboundCount} · Out {outboundCount}
+          </div>
+          <label className="relative">
+            <span className="sr-only">Filter</span>
+            <select
+              value={connFilter}
+              onChange={(e) => setConnFilter(e.target.value as ConnFilter)}
+              className="h-7 max-w-[9rem] appearance-none rounded-md border border-border bg-surface-elevated py-0.5 pl-2 pr-6 font-mono text-[10px] text-fg outline-none"
+            >
+              {filterOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-faint"
+              aria-hidden
+            />
+          </label>
         </div>
         <ul className="flex gap-2 overflow-x-auto px-2 py-2">
-          {connections.slice(0, 8).map((c) => (
+          {filteredConnections.slice(0, 8).map((c) => (
             <li
               key={c.id}
               className="min-w-[9.5rem] shrink-0 rounded-lg border border-border bg-surface px-2.5 py-2"
@@ -413,17 +557,22 @@ export function Hud() {
                 </span>{" "}
                 {c.city}, {c.country}
               </p>
-              <p className="font-mono text-[10px] text-muted">{c.ip}</p>
+              <p className="font-mono text-[10px] text-muted">
+                {c.protocol} · {c.ip}
+              </p>
             </li>
           ))}
           {connections.length === 0 && (
             <li className="px-2 py-3 text-xs text-muted">No active links</li>
           )}
+          {connections.length > 0 && filteredConnections.length === 0 && (
+            <li className="px-2 py-3 text-xs text-muted">No matches</li>
+          )}
         </ul>
       </div>
 
       <p className="pointer-events-none mt-2 hidden text-center text-[11px] text-faint sm:block">
-        Drag to orbit · Scroll to zoom · Labels show peer cities
+        Drag to orbit · Scroll to zoom · Use the filter on Connections
       </p>
     </div>
   );
