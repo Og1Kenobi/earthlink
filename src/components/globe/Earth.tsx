@@ -16,10 +16,8 @@ import {
 
 const EARTH_RADIUS = 2;
 
-// Natural Earth 110m — light enough for browser, clear country outlines
 const COUNTRIES_URL =
   "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_countries.geojson";
-// State / province lines
 const STATES_URL =
   "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_1_states_provinces_lines.geojson";
 
@@ -66,31 +64,34 @@ function LineSet({
 function BorderLayers({ radius }: { radius: number }) {
   const [countries, setCountries] = useState<THREE.BufferGeometry[]>([]);
   const [states, setStates] = useState<THREE.BufferGeometry[]>([]);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const res = await fetch(COUNTRIES_URL);
-        if (!res.ok) throw new Error("countries fetch failed");
-        const fc = (await res.json()) as GeoJsonFeatureCollection;
+        const [cRes, sRes] = await Promise.all([
+          fetch(COUNTRIES_URL),
+          fetch(STATES_URL),
+        ]);
+        if (!cRes.ok) throw new Error("countries fetch failed");
+        const cFc = (await cRes.json()) as GeoJsonFeatureCollection;
         if (cancelled) return;
-        setCountries(geometriesFromCollection(fc, radius * 1.002, 300));
-      } catch (e) {
-        console.warn("[earthlink] country borders:", e);
-      }
-    })();
+        setCountries(geometriesFromCollection(cFc, radius * 1.003, 300));
 
-    (async () => {
-      try {
-        const res = await fetch(STATES_URL);
-        if (!res.ok) throw new Error("states fetch failed");
-        const fc = (await res.json()) as GeoJsonFeatureCollection;
-        if (cancelled) return;
-        setStates(geometriesFromCollection(fc, radius * 1.0015, 500));
+        if (sRes.ok) {
+          const sFc = (await sRes.json()) as GeoJsonFeatureCollection;
+          if (!cancelled) {
+            setStates(geometriesFromCollection(sFc, radius * 1.0025, 500));
+          }
+        }
+        if (!cancelled) setStatus("ready");
       } catch (e) {
-        console.warn("[earthlink] state borders:", e);
+        console.warn("[earthlink] borders:", e);
+        if (!cancelled) setStatus("error");
       }
     })();
 
@@ -100,7 +101,7 @@ function BorderLayers({ radius }: { radius: number }) {
   }, [radius]);
 
   const grid = useMemo(
-    () => createLatLonGrid(radius * 1.001, 15, 15, 72),
+    () => createLatLonGrid(radius * 1.0015, 15, 15, 80),
     [radius],
   );
 
@@ -112,13 +113,15 @@ function BorderLayers({ radius }: { radius: number }) {
 
   return (
     <group>
-      <LineSet geometries={grid} color="#94a3b8" opacity={0.22} />
+      <LineSet geometries={grid} color="#64748b" opacity={0.28} />
       {states.length > 0 && (
-        <LineSet geometries={states} color="#64748b" opacity={0.35} />
+        <LineSet geometries={states} color="#475569" opacity={0.45} />
       )}
       {countries.length > 0 && (
-        <LineSet geometries={countries} color="#0f172a" opacity={0.55} />
+        <LineSet geometries={countries} color="#0f172a" opacity={0.72} />
       )}
+      {/* invisible status for debug */}
+      {status === "loading" ? null : null}
     </group>
   );
 }
@@ -132,15 +135,15 @@ export function Earth({
 }) {
   const group = useRef<THREE.Group>(null);
 
+  // Cool slate-blue body so borders read on white
   const landMat = useMemo(
     () =>
       new THREE.MeshPhongMaterial({
-        color: new THREE.Color("#e8eef5"),
-        emissive: new THREE.Color("#dbe4f0"),
-        emissiveIntensity: 0.35,
-        specular: new THREE.Color("#ffffff"),
-        shininess: 12,
-        flatShading: false,
+        color: new THREE.Color("#b6c4d6"),
+        emissive: new THREE.Color("#9aadc4"),
+        emissiveIntensity: 0.22,
+        specular: new THREE.Color("#e2e8f0"),
+        shininess: 28,
       }),
     [],
   );
@@ -148,9 +151,7 @@ export function Earth({
   const coreMat = useMemo(
     () =>
       new THREE.MeshBasicMaterial({
-        color: new THREE.Color("#f8fafc"),
-        transparent: true,
-        opacity: 0.92,
+        color: new THREE.Color("#d8e2ee"),
         toneMapped: false,
       }),
     [],
@@ -171,18 +172,19 @@ export function Earth({
   return (
     <group ref={group}>
       <mesh material={coreMat}>
-        <sphereGeometry args={[EARTH_RADIUS * 0.995, 64, 64]} />
+        <sphereGeometry args={[EARTH_RADIUS * 0.992, 64, 64]} />
       </mesh>
       <mesh material={landMat}>
         <sphereGeometry args={[EARTH_RADIUS, 96, 96]} />
       </mesh>
-      <mesh scale={1.004}>
-        <sphereGeometry args={[EARTH_RADIUS, 48, 48]} />
+      {/* faint tech wire shell */}
+      <mesh scale={1.005}>
+        <sphereGeometry args={[EARTH_RADIUS, 36, 36]} />
         <meshBasicMaterial
-          color="#334155"
+          color="#1e293b"
           wireframe
           transparent
-          opacity={0.04}
+          opacity={0.06}
           depthWrite={false}
           toneMapped={false}
         />

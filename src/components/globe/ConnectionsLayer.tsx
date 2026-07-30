@@ -10,21 +10,21 @@ import {
 import { createArcPoints, latLonToVector3 } from "@/lib/geo";
 import { EARTH_RADIUS } from "./Earth";
 
-const SURFACE = EARTH_RADIUS * 1.014;
+const SURFACE = EARTH_RADIUS * 1.016;
 
 const COLORS = {
   inbound: {
-    arc: "#059669",
-    glow: "#0ea5e9",
+    arc: "#047857",
+    glow: "#0369a1",
     dot: "#059669",
-    pulse: "#34d399",
+    pulse: "#10b981",
     label: "#047857",
   },
   outbound: {
-    arc: "#d97706",
-    glow: "#ea580c",
+    arc: "#b45309",
+    glow: "#c2410c",
     dot: "#d97706",
-    pulse: "#fbbf24",
+    pulse: "#f59e0b",
     label: "#b45309",
   },
 } as const;
@@ -56,7 +56,7 @@ function ConnectionArc({
       new THREE.LineBasicMaterial({
         color: colors.arc,
         transparent: true,
-        opacity: 0.9,
+        opacity: 0.95,
         depthWrite: false,
         toneMapped: false,
       }),
@@ -66,7 +66,7 @@ function ConnectionArc({
       new THREE.LineBasicMaterial({
         color: colors.glow,
         transparent: true,
-        opacity: 0.2,
+        opacity: 0.28,
         depthWrite: false,
         toneMapped: false,
       }),
@@ -87,9 +87,9 @@ function ConnectionArc({
     const now = performance.now();
     const life = connectionLife(conn, now);
     const mat = lineRef.current?.material as THREE.LineBasicMaterial | undefined;
-    if (mat) mat.opacity = 0.15 + life * 0.75;
+    if (mat) mat.opacity = 0.2 + life * 0.75;
     const gmat = glowRef.current?.material as THREE.LineBasicMaterial | undefined;
-    if (gmat) gmat.opacity = 0.04 + life * 0.16;
+    if (gmat) gmat.opacity = 0.06 + life * 0.22;
     if (remoteRef.current) {
       const m = remoteRef.current.material as THREE.MeshBasicMaterial;
       m.opacity = life;
@@ -115,6 +115,12 @@ function ConnectionArc({
     ? `${conn.city}${conn.country ? `, ${conn.country}` : ""}`
     : conn.ip;
 
+  // Lift label slightly off the surface toward camera is handled by Html
+  const labelPos = useMemo(
+    () => remotePos.clone().multiplyScalar(1.04),
+    [remotePos],
+  );
+
   return (
     <group>
       <primitive
@@ -131,7 +137,7 @@ function ConnectionArc({
       />
 
       <mesh ref={remoteRef} position={remotePos}>
-        <sphereGeometry args={[0.012, 12, 12]} />
+        <sphereGeometry args={[0.014, 12, 12]} />
         <meshBasicMaterial
           color={colors.dot}
           transparent
@@ -140,18 +146,18 @@ function ConnectionArc({
         />
       </mesh>
       <mesh position={remotePos}>
-        <sphereGeometry args={[0.022, 12, 12]} />
+        <sphereGeometry args={[0.026, 12, 12]} />
         <meshBasicMaterial
           color={colors.dot}
           transparent
-          opacity={0.25}
+          opacity={0.3}
           depthWrite={false}
           toneMapped={false}
         />
       </mesh>
 
       <mesh ref={pulseRef}>
-        <sphereGeometry args={[0.008, 10, 10]} />
+        <sphereGeometry args={[0.009, 10, 10]} />
         <meshBasicMaterial
           color={colors.pulse}
           transparent
@@ -161,11 +167,13 @@ function ConnectionArc({
       </mesh>
 
       <Html
-        position={remotePos}
+        position={labelPos}
         center
-        distanceFactor={6.5}
+        sprite
+        distanceFactor={7}
+        occlude={false}
         style={{ pointerEvents: "none" }}
-        zIndexRange={[20, 0]}
+        zIndexRange={[40, 0]}
       >
         <div
           className="city-pin"
@@ -196,6 +204,7 @@ function HomeBeacon({
   const core = useRef<THREE.Mesh>(null);
   const ring = useRef<THREE.Mesh>(null);
   const pos = useMemo(() => latLonToVector3(lat, lon, SURFACE), [lat, lon]);
+  const labelPos = useMemo(() => pos.clone().multiplyScalar(1.05), [pos]);
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
@@ -206,7 +215,7 @@ function HomeBeacon({
       const s = 1 + ((t * 0.8) % 1) * 1.5;
       const o = 1 - ((t * 0.8) % 1);
       ring.current.scale.setScalar(s);
-      (ring.current.material as THREE.MeshBasicMaterial).opacity = o * 0.5;
+      (ring.current.material as THREE.MeshBasicMaterial).opacity = o * 0.55;
     }
   });
 
@@ -223,7 +232,7 @@ function HomeBeacon({
     <group>
       <group position={pos} quaternion={quat}>
         <mesh ref={core}>
-          <sphereGeometry args={[0.028, 16, 16]} />
+          <sphereGeometry args={[0.03, 16, 16]} />
           <meshBasicMaterial
             color="#2563eb"
             transparent
@@ -232,7 +241,7 @@ function HomeBeacon({
           />
         </mesh>
         <mesh ref={ring} rotation={[Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.032, 0.048, 40]} />
+          <ringGeometry args={[0.034, 0.052, 40]} />
           <meshBasicMaterial
             color="#2563eb"
             transparent
@@ -243,11 +252,13 @@ function HomeBeacon({
         </mesh>
       </group>
       <Html
-        position={pos}
+        position={labelPos}
         center
-        distanceFactor={6.5}
+        sprite
+        distanceFactor={7}
+        occlude={false}
         style={{ pointerEvents: "none" }}
-        zIndexRange={[30, 0]}
+        zIndexRange={[50, 0]}
       >
         <div className="city-pin city-pin-home">
           <span className="city-pin-dir">HOME</span>
@@ -258,7 +269,6 @@ function HomeBeacon({
   );
 }
 
-/** Cap concurrent labels so the globe stays readable. */
 function useVisibleConnections(connections: Connection[], max = 18) {
   return useMemo(() => {
     const live = connections.filter((c) => c.live !== false);
