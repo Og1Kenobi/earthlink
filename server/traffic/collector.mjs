@@ -236,7 +236,9 @@ export function createTrafficCollector(options = {}) {
     if (existing) {
       existing.lastSeen = now;
       existing.goneAt = null;
+      existing.misses = 0;
       existing.protocol = s.protocol;
+
       existing.remotePort = s.remotePort;
       existing.localPort = s.localPort;
       existing.direction = s.direction;
@@ -311,6 +313,7 @@ export function createTrafficCollector(options = {}) {
       createdAt: now,
       lastSeen: now,
       goneAt: null,
+      misses: 0,
       real: true,
       hostId,
       os,
@@ -384,10 +387,13 @@ export function createTrafficCollector(options = {}) {
         if (k) seenKeys.add(k);
       }
 
-      // mark local gone
+      // mark local gone only after a few missed polls (avoids arc flicker)
+      const MISS_BEFORE_GONE = 3;
       for (const [key, conn] of active) {
         if (conn.hostId !== HOST_ID) continue;
-        if (!seenKeys.has(key) && conn.goneAt == null) {
+        if (seenKeys.has(key)) continue;
+        conn.misses = (conn.misses || 0) + 1;
+        if (conn.misses >= MISS_BEFORE_GONE && conn.goneAt == null) {
           conn.goneAt = now;
           pushHistory({
             type: "close",
@@ -503,10 +509,13 @@ export function createTrafficCollector(options = {}) {
       if (k) seenKeys.add(k);
     }
 
-    // mark missing remote as gone
+    // mark missing remote only after a few missed pushes
+    const MISS_BEFORE_GONE = 2;
     for (const [key, conn] of active) {
       if (conn.hostId !== hostId) continue;
-      if (!seenKeys.has(key) && conn.goneAt == null) {
+      if (seenKeys.has(key)) continue;
+      conn.misses = (conn.misses || 0) + 1;
+      if (conn.misses >= MISS_BEFORE_GONE && conn.goneAt == null) {
         conn.goneAt = now;
       }
     }

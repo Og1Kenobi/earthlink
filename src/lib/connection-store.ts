@@ -728,7 +728,8 @@ export const useConnectionStore = create<State>((set, get) => ({
       seenSshSubnets,
     } = get();
     const now = performance.now();
-    const linger = 4500;
+    const linger = 7000;
+
     let newCount = 0;
     const freshEvents: TrafficEvent[] = [];
     const freshTrails: TrailPoint[] = [];
@@ -973,8 +974,13 @@ export function connectionLife(c: Connection, now: number): number {
   // (age/ttl is wrong for long-lived real sockets that then close)
   const remaining = c.ttl - age;
   if (remaining <= 0) return 0;
-  const fadeOut = Math.min(2200, Math.max(400, c.ttl * 0.4));
-  if (remaining < fadeOut) return remaining / fadeOut;
+  // longer, softer fade-out so arcs ease out instead of popping
+  const fadeOut = Math.min(4500, Math.max(1200, c.ttl * 0.55));
+  if (remaining < fadeOut) {
+    // ease-out curve
+    const t = remaining / fadeOut;
+    return t * t;
+  }
   // short fade-in for demo
   if (!c.real && age < 200) return age / 200;
   return 1;

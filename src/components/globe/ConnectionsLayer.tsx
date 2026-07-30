@@ -10,55 +10,103 @@ import {
   protocolWeight,
   useConnectionStore,
   type Connection,
-  type TrafficDirection,
+  type TrailPoint,
 } from "@/lib/connection-store";
-import { latLonToVector3 } from "@/lib/geo";
+import { createArcPoints, latLonToVector3 } from "@/lib/geo";
 import { EARTH_RADIUS } from "./Earth";
 
-const ARC_ALTITUDE = 0.18;
-const DOT_SIZE = 0.02;
+const SURFACE = EARTH_RADIUS * 1.02;
 
-function arcPoints(
-  fromLat: number,
-  fromLon: number,
-  toLat: number,
-  toLon: number,
-  segments = 64,
-): THREE.Vector3[] {
-  const a = latLonToVector3(fromLat, fromLon, EARTH_RADIUS);
-  const b = latLonToVector3(toLat, toLon, EARTH_RADIUS);
-  // Spherical slerp so arcs sit above the surface cleanly
-  const pts: THREE.Vector3[] = [];
-  const angle = Math.max(a.angleTo(b), 1e-6);
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const sin = Math.sin(angle);
-    const p = new THREE.Vector3()
-      .addScaledVector(a, Math.sin((1 - t) * angle) / sin)
-      .addScaledVector(b, Math.sin(t * angle) / sin)
-      .normalize();
-    const lift = Math.sin(Math.PI * t) * ARC_ALTITUDE;
-    p.multiplyScalar(EARTH_RADIUS + lift);
-    pts.push(p);
-  }
-  return pts;
+const COLORS = {
+  inbound: {
+    arc: "#2ee6a6",
+    glow: "#22d3ee",
+    dot: "#34d399",
+    pulse: "#6ee7b7",
+    impact: "#5eead4",
+  },
+  outbound: {
+    arc: "#f59e0b",
+    glow: "#fb923c",
+    dot: "#fbbf24",
+    pulse: "#fde68a",
+    impact: "#fdba74",
+  },
+} as const;
+
+function ImpactRing({
+  pos,
+  color,
+  born,
+}: {
+  pos: THREE.Vector3;
+  color: string;
+  born: number;
+}) {
+  const ref = useRef<THREE.Mesh>(null);
+  const quat = useMemo(() => {
+    const q = new THREE.Quaternion();
+    q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), pos.clone().normalize());
+    return q;
+  }, [pos]);
+
+  useFrame(() => {
+    if (!ref.current) return;
+    const age = (performance.now() - born) / 900;
+    if (age > 1) {
+      ref.current.visible = false;
+      return;
+    }
+    ref.current.visible = true;
+    ref.current.scale.setScalar(1 + age * 4.5);
+    (ref.current.material as THREE.MeshBasicMaterial).opacity = (1 - age) * 0.65;
+  });
+
+  return (
+    <mesh ref={ref} position={pos} quaternion={quat} renderOrder={14}>
+      <ringGeometry args={[0.02, 0.034, 48]} />
+      <meshBasicMaterial
+        color={color}
+        transparent
+        side={THREE.DoubleSide}
+        depthWrite={false}
+        toneMapped={false}
+      />
+    </mesh>
+  );
 }
 
-function HomeBeacon({ lat, lon }: { lat: number; lon: number }) {
+function HeatTrail({ trail }: { trail: TrailPoint }) {
   const ref = useRef<THREE.Mesh>(null);
   const pos = useMemo(
-    () => latLonToVector3(lat, lon, EARTH_RADIUS + 0.02),
-    [lat, lon],
+    () => latLonToVector3(trail.lat, trail.lon, SURFACE * 1.01),
+    [trail.lat, trail.lon],
   );
-  useFrame(({ clock }) => {
+
+  useFrame(() => {
     if (!ref.current) return;
-    const s = 1 + Math.sin(clock.elapsedTime * 3) * 0.15;
+    const age = (performance.now() - trail.born) / trail.ttl;
+    if (age >= 1) {
+      ref.current.visible = false;
+      return;
+    }
+    ref.current.visible = true;
+    const s = 0.8 + age * 2.8;
     ref.current.scale.setScalar(s);
+    (ref.current.material as THREE.MeshBasicMaterial).opacity =
+      (1 - age) * 0.45;
   });
+
   return (
-    <mesh ref={ref} position={pos}>
-      <sphereGeometry args={[0.04, 16, 16]} />
-      <meshBasicMaterial color="#38bdf8" toneMapped={false} />
+    <mesh ref={ref} position={pos} renderOrder={8}>
+      <sphereGeometry args={[0.04, 12, 12]} />
+      <meshBasicMaterial
+        color={trail.color}
+        transparent
+        depthWrite={false}
+        toneMapped={false}
+        blending={THREE.AdditiveBlending}
+      />
     </mesh>
   );
 }
@@ -74,112 +122,248 @@ function ConnectionArc({
   homeLon: number;
   selected: boolean;
 }) {
-  const group = useRef<THREE.Group>(null);
-  const matRef = useRef<THREE.Material | null>(null);
-  const dotRef = useRef<THREE.MeshBasicMaterial>(null);
-  const inbound = conn.direction === "inbound";
-  const color = inbound ? "#2ee6a6" : "#f59e0b";
-  const weight = protocolWeight(conn.protocol, conn.bytesPerSec ?? 0);
-  const pts = useMemo(
-    () =>
-      inbound
-        ? arcPoints(conn.lat, conn.lon, homeLat, homeLon)
-        : arcPoints(homeLat, homeLon, conn.lat, conn.lon),
-    [conn.lat, conn.lon, homeLat, homeLon, inbound],
-  );
-  const remote = useMemo(
-    () => latLonToVector3(conn.lat, conn.lon, EARTH_RADIUS + 0.02),
-    [conn.lat, conn.lon],
+  const rootRef = useRef<THREE.Group>(null);
+  const remoteRef = useRef<THREE.Mesh>(null);
+  const pulseRef = useRef<THREE.Mesh>(null);
+  const heatRef = useRef<THREE.Mesh>(null);
+  const lineRef = useRef<THREE.Group>(null);
+  const glowRef = useRef<THREE.Group>(null);
+  const haloRef = useRef<THREE.MeshBasicMaterial>(null);
+
+  const direction = conn.direction === "inbound" ? "inbound" : "outbound";
+  const colors = COLORS[direction];
+  // Keep weight subtle so arcs stay thin
+  const weight =
+    (0.75 + protocolWeight(conn.protocol, conn.bytesPerSec || 0) * 0.35) *
+    (selected ? 1.35 : 1);
+
+  const { points, remotePos } = useMemo(() => {
+    const remotePos = latLonToVector3(conn.lat, conn.lon, SURFACE);
+    const homePos = latLonToVector3(homeLat, homeLon, SURFACE);
+    const points = createArcPoints(remotePos, homePos, EARTH_RADIUS, 80);
+    return { points, remotePos };
+  }, [conn.lat, conn.lon, homeLat, homeLon]);
+
+  const linePoints = useMemo(
+    () => points.map((p) => p.toArray() as [number, number, number]),
+    [points],
   );
 
-  useFrame(() => {
-    const life = connectionLife(conn, performance.now());
-    if (group.current) group.current.visible = life > 0.02;
-    const lineOpacity = 0.45 + life * 0.5;
-    const dotOpacity = 0.55 + life * 0.45;
-    // drei Line material may be on children
-    group.current?.traverse((obj) => {
-      const m = (obj as THREE.Mesh).material;
-      if (!m) return;
-      const mats = Array.isArray(m) ? m : [m];
-      for (const mat of mats) {
-        if ("opacity" in mat) {
-          mat.transparent = true;
-          mat.opacity = obj.type === "Line2" || obj.type === "Line" || obj.type === "Mesh"
-            ? (obj as THREE.Mesh).geometry?.type?.includes("Sphere")
-              ? dotOpacity
-              : lineOpacity
-            : lineOpacity;
-          mat.depthWrite = false;
+  useFrame((state) => {
+    const now = performance.now();
+    const life = connectionLife(conn, now);
+    const selBoost = selected ? 1.1 : 1;
+
+    if (rootRef.current) {
+      rootRef.current.visible = life > 0.03;
+    }
+
+    const applyOpacity = (group: THREE.Group | null, opacity: number) => {
+      if (!group) return;
+      group.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (mesh.material && "opacity" in mesh.material) {
+          const m = mesh.material as THREE.Material & {
+            opacity: number;
+            transparent: boolean;
+          };
+          m.transparent = true;
+          m.opacity = opacity;
+          m.depthWrite = false;
         }
-      }
-    });
-    if (dotRef.current) {
-      dotRef.current.opacity = dotOpacity;
+      });
+    };
+
+    // Smooth opacity curve for arcs (never hard cut until life≈0)
+    applyOpacity(lineRef.current, (0.25 + life * 0.7) * selBoost);
+    applyOpacity(glowRef.current, (0.08 + life * 0.22) * selBoost);
+
+    if (remoteRef.current) {
+      const m = remoteRef.current.material as THREE.MeshBasicMaterial;
+      m.opacity = 0.55 + life * 0.45;
+      const s =
+        1 + Math.sin(state.clock.elapsedTime * 6 + conn.createdAt * 0.001) * 0.1;
+      remoteRef.current.scale.setScalar(s * Math.max(life, 0.05) * selBoost);
+    }
+    if (haloRef.current) {
+      haloRef.current.opacity = life * 0.38;
+    }
+    if (heatRef.current) {
+      const m = heatRef.current.material as THREE.MeshBasicMaterial;
+      m.opacity = life * 0.32;
+      heatRef.current.scale.setScalar((1.2 + (1 - life) * 1.6) * selBoost);
+    }
+    if (pulseRef.current) {
+      let t = (state.clock.elapsedTime * 0.85 + conn.createdAt * 0.001) % 1;
+      if (direction === "outbound") t = 1 - t;
+      const idx = Math.min(
+        points.length - 1,
+        Math.floor(t * (points.length - 1)),
+      );
+      pulseRef.current.position.copy(points[idx]!);
+      const m = pulseRef.current.material as THREE.MeshBasicMaterial;
+      m.opacity = life * 0.9;
+      pulseRef.current.scale.setScalar((0.5 + life * 0.55) * selBoost);
     }
   });
 
-  const lineWidth = Math.max(1.5, (selected ? 2.8 : 1.8) * weight);
-
   return (
-    <group ref={group}>
-      <Line
-        points={pts}
-        color={color}
-        lineWidth={lineWidth}
-        transparent
-        opacity={0.85}
-        depthWrite={false}
-        depthTest
-        toneMapped={false}
-        frustumCulled={false}
-      />
-      {/* secondary soft arc for visibility */}
-      <Line
-        points={pts}
-        color={color}
-        lineWidth={lineWidth * 2.2}
-        transparent
-        opacity={0.2}
-        depthWrite={false}
-        depthTest
-        toneMapped={false}
-        frustumCulled={false}
-      />
-      <mesh position={remote}>
-        <sphereGeometry
-          args={[
-            DOT_SIZE * (selected ? 1.6 : 1) * Math.min(weight, 1.5),
-            12,
-            12,
-          ]}
+    <group ref={rootRef}>
+      {/* soft outer glow — thin */}
+      <group ref={glowRef} renderOrder={9}>
+        <Line
+          points={linePoints}
+          color={colors.glow}
+          lineWidth={1.6 * weight}
+          transparent
+          opacity={0.22}
+          depthWrite={false}
+          depthTest
+          toneMapped={false}
         />
-        <meshBasicMaterial
-          ref={dotRef}
-          color={color}
+      </group>
+      {/* crisp core arc */}
+      <group ref={lineRef} renderOrder={10}>
+        <Line
+          points={linePoints}
+          color={selected ? "#ffffff" : colors.arc}
+          lineWidth={1.05 * weight}
           transparent
           opacity={0.9}
-          toneMapped={false}
           depthWrite={false}
+          depthTest
+          toneMapped={false}
+        />
+      </group>
+
+      {/* soft bloom under the pin */}
+      <mesh ref={heatRef} position={remotePos} renderOrder={10}>
+        <sphereGeometry args={[0.026, 14, 14]} />
+        <meshBasicMaterial
+          color={colors.glow}
+          transparent
+          opacity={0.22}
+          depthWrite={false}
+          toneMapped={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      {/* crisp pin */}
+      <mesh ref={remoteRef} position={remotePos} renderOrder={12}>
+        <sphereGeometry args={[0.007, 12, 12]} />
+        <meshBasicMaterial
+          color={selected ? "#fff" : colors.dot}
+          transparent
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+      {/* additive halo ring-ish shell */}
+      <mesh position={remotePos} renderOrder={11}>
+        <sphereGeometry args={[0.014, 12, 12]} />
+        <meshBasicMaterial
+          ref={haloRef}
+          color={colors.dot}
+          transparent
+          opacity={0.3}
+          depthWrite={false}
+          toneMapped={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      {/* traveling pulse along the arc */}
+      <mesh ref={pulseRef} renderOrder={13}>
+        <sphereGeometry args={[0.0055, 8, 8]} />
+        <meshBasicMaterial
+          color={colors.pulse}
+          transparent
+          depthWrite={false}
+          toneMapped={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      {conn.impactAt != null && (
+        <ImpactRing
+          pos={remotePos}
+          color={colors.impact}
+          born={conn.impactAt}
+        />
+      )}
+    </group>
+  );
+}
+
+function HomeBeacon({ lat, lon }: { lat: number; lon: number }) {
+  const core = useRef<THREE.Mesh>(null);
+  const ring = useRef<THREE.Mesh>(null);
+  const pos = useMemo(
+    () => latLonToVector3(lat, lon, SURFACE * 1.01),
+    [lat, lon],
+  );
+  const quat = useMemo(() => {
+    const q = new THREE.Quaternion();
+    q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), pos.clone().normalize());
+    return q;
+  }, [pos]);
+
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    if (core.current) {
+      core.current.scale.setScalar(1 + Math.sin(t * 3) * 0.12);
+    }
+    if (ring.current) {
+      const a = (t * 0.6) % 1;
+      ring.current.scale.setScalar(1 + a * 2.2);
+      (ring.current.material as THREE.MeshBasicMaterial).opacity =
+        (1 - a) * 0.45;
+    }
+  });
+
+  return (
+    <group>
+      <mesh ref={core} position={pos} renderOrder={15}>
+        <sphereGeometry args={[0.018, 16, 16]} />
+        <meshBasicMaterial color="#38bdf8" toneMapped={false} />
+      </mesh>
+      <mesh position={pos} renderOrder={14}>
+        <sphereGeometry args={[0.032, 16, 16]} />
+        <meshBasicMaterial
+          color="#22d3ee"
+          transparent
+          opacity={0.25}
+          depthWrite={false}
+          toneMapped={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+      <mesh ref={ring} position={pos} quaternion={quat} renderOrder={14}>
+        <ringGeometry args={[0.02, 0.028, 48]} />
+        <meshBasicMaterial
+          color="#67e8f9"
+          transparent
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          toneMapped={false}
         />
       </mesh>
     </group>
   );
 }
 
-function useVisibleConnections(list: Connection[], max = 64) {
+function useVisibleConnections(list: Connection[], max = 48) {
   return useMemo(() => {
-    // Prefer live, then most recently created
     const live = list.filter((c) => c.live !== false);
     const dead = list.filter((c) => c.live === false);
-    const sortedLive = [...live].sort(
+    const byRate = [...live].sort(
       (a, b) => (b.bytesPerSec || 0) - (a.bytesPerSec || 0),
     );
-    return [...sortedLive, ...dead].slice(0, max);
+    return [...byRate, ...dead].slice(0, max);
   }, [list, max]);
 }
 
-/** Connections as they should appear under mute + preset + agent + optional replay */
 function useDisplayConnections() {
   const connections = useConnectionStore((s) => s.connections);
   const mutedPeers = useConnectionStore((s) => s.mutedPeers);
@@ -248,7 +432,7 @@ export function ConnectionsLayer() {
   const selectedId = useConnectionStore((s) => s.selectedId);
   const trails = useConnectionStore((s) => s.trails);
   const display = useDisplayConnections();
-  const visible = useVisibleConnections(display, 72);
+  const visible = useVisibleConnections(display, 56);
 
   useFrame(() => {
     useConnectionStore.getState().tick(performance.now());
@@ -257,6 +441,9 @@ export function ConnectionsLayer() {
   return (
     <group>
       <HomeBeacon lat={home.lat} lon={home.lon} />
+      {trails.slice(0, 36).map((t) => (
+        <HeatTrail key={t.id} trail={t} />
+      ))}
       {visible.map((c) => (
         <ConnectionArc
           key={c.id}
@@ -266,25 +453,6 @@ export function ConnectionsLayer() {
           selected={c.id === selectedId}
         />
       ))}
-      {trails.slice(0, 40).map((t) => {
-        const p = latLonToVector3(t.lat, t.lon, EARTH_RADIUS + 0.01);
-        const age = (performance.now() - t.born) / t.ttl;
-        if (age >= 1) return null;
-        return (
-          <mesh key={t.id} position={p}>
-            <sphereGeometry args={[0.03, 8, 8]} />
-            <meshBasicMaterial
-              color={t.color}
-              transparent
-              opacity={0.25 * (1 - age)}
-              depthWrite={false}
-              toneMapped={false}
-            />
-          </mesh>
-        );
-      })}
     </group>
   );
 }
-
-export type { TrafficDirection };
