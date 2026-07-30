@@ -1,10 +1,6 @@
 import { create } from "zustand";
 import {
   DEFAULT_HOME,
-  fakeIp,
-  randomProtocol,
-  randomRemoteCity,
-  type City,
 } from "./locations";
 import { haversineKm } from "./geo";
 import type { HomeSource } from "./home-location";
@@ -134,7 +130,7 @@ export type Home = {
   org?: string;
 };
 
-export type TrafficMode = "real" | "demo" | "connecting";
+export type TrafficMode = "real" | "connecting";
 
 export type AgentInfo = {
   hostId: string;
@@ -235,8 +231,6 @@ type State = {
   homeReady: boolean;
   connections: Connection[];
   totalSeen: number;
-  paused: boolean;
-  intensity: "calm" | "normal" | "busy";
   mode: TrafficMode;
   agentError: string | null;
   agentActiveCount: number;
@@ -269,8 +263,6 @@ type State = {
 
   setHome: (home: Partial<Home> & { lat: number; lon: number }) => void;
   setHomeReady: (ready: boolean) => void;
-  setPaused: (paused: boolean) => void;
-  setIntensity: (intensity: State["intensity"]) => void;
   setMode: (mode: TrafficMode) => void;
   setAgentError: (error: string | null) => void;
   setAgentActiveCount: (n: number) => void;
@@ -295,9 +287,7 @@ type State = {
   setMuteEnabled: (ip: string, enabled: boolean) => void;
   toggleMuteIp: (ip: string, meta?: { label?: string; note?: string }) => void;
   addMuteFromInput: (raw: string) => boolean;
-  spawnConnection: (
-    override?: Partial<City> & { direction?: TrafficDirection },
-  ) => void;
+
   upsertRealConnections: (rows: RealRow[]) => void;
   tick: (now: number) => void;
   clear: () => void;
@@ -307,11 +297,6 @@ type State = {
 let idSeq = 0;
 const seenRealIds = new Set<string>();
 
-function ttlForIntensity(intensity: State["intensity"]): number {
-  if (intensity === "calm") return 14000 + Math.random() * 8000;
-  if (intensity === "busy") return 7000 + Math.random() * 5000;
-  return 10000 + Math.random() * 7000;
-}
 
 function eventText(c: {
   direction?: TrafficDirection;
@@ -459,8 +444,6 @@ export const useConnectionStore = create<State>((set, get) => ({
   homeReady: false,
   connections: [],
   totalSeen: 0,
-  paused: false,
-  intensity: "normal",
   mode: "connecting",
   agentError: null,
   agentActiveCount: 0,
@@ -503,8 +486,6 @@ export const useConnectionStore = create<State>((set, get) => ({
     })),
 
   setHomeReady: (homeReady) => set({ homeReady }),
-  setPaused: (paused) => set({ paused }),
-  setIntensity: (intensity) => set({ intensity }),
   setMode: (mode) => set({ mode }),
   setAgentError: (agentError) => set({ agentError }),
   setAgentActiveCount: (agentActiveCount) => set({ agentActiveCount }),
@@ -639,84 +620,6 @@ export const useConnectionStore = create<State>((set, get) => ({
     return true;
   },
 
-  spawnConnection: (override) => {
-    const { home, intensity, mode, soundEnabled, mutedPeers } = get();
-    if (mode === "real") return;
-    const city = override
-      ? {
-          name: override.name ?? "Unknown",
-          country: override.country ?? "??",
-          lat: override.lat ?? 0,
-          lon: override.lon ?? 0,
-        }
-      : randomRemoteCity({
-          name: home.label,
-          country: "",
-          lat: home.lat,
-          lon: home.lon,
-        });
-
-    const { protocol, port } = randomProtocol();
-    const direction: TrafficDirection =
-      override?.direction ?? (Math.random() < 0.45 ? "inbound" : "outbound");
-    const now = performance.now();
-    const conn: Connection = {
-      id: `c-${++idSeq}-${Date.now()}`,
-      ip: fakeIp(),
-      city: city.name,
-      country: city.country,
-      lat: city.lat,
-      lon: city.lon,
-      protocol,
-      port,
-      bytes: Math.floor(Math.random() * 900_000) + 1200,
-      bytesPerSec: Math.random() * 40_000,
-      createdAt: now,
-      ttl: ttlForIntensity(intensity),
-      distanceKm: Math.round(
-        haversineKm(city.lat, city.lon, home.lat, home.lon),
-      ),
-      real: false,
-      live: true,
-      direction,
-      impactAt: now,
-      org: null,
-      process: null,
-    };
-
-    const muted = isIpMuted(conn.ip, mutedPeers);
-    if (soundEnabled && !muted) playConnectionBlip(direction, protocol);
-
-    set((s) => {
-      const connections = [conn, ...s.connections].slice(0, 80);
-      const trail: TrailPoint = {
-        id: `t-${conn.id}`,
-        lat: conn.lat,
-        lon: conn.lon,
-        color: direction === "inbound" ? "#2ee6a6" : "#f59e0b",
-        born: now,
-        ttl: 25000,
-        direction,
-      };
-      const ev: TrafficEvent = {
-        id: conn.id,
-        at: now,
-        text: eventText(conn),
-        direction,
-        protocol,
-        city: conn.city,
-        country: conn.country,
-        ip: conn.ip,
-      };
-      return {
-        connections,
-        totalSeen: s.totalSeen + 1,
-        events: muted ? s.events : [ev, ...s.events].slice(0, 40),
-        trails: muted ? s.trails : [trail, ...s.trails].slice(0, 120),
-        ...recount(connections, s.mutedPeers),
-      };
-    });
-  },
 
   upsertRealConnections: (rows) => {
     const {

@@ -16,8 +16,6 @@ import {
   MapPin,
   Minimize2,
   Network,
-  Pause,
-  Play,
   Plus,
   Radio,
   Server,
@@ -25,7 +23,6 @@ import {
   Trash2,
   Volume2,
   VolumeX,
-  Zap,
   X,
 } from "lucide-react";
 import {
@@ -130,8 +127,6 @@ export function Hud() {
   const homeReady = useConnectionStore((s) => s.homeReady);
   const connections = useConnectionStore((s) => s.connections);
   const totalSeen = useConnectionStore((s) => s.totalSeen);
-  const paused = useConnectionStore((s) => s.paused);
-  const intensity = useConnectionStore((s) => s.intensity);
   const mode = useConnectionStore((s) => s.mode);
   const agentError = useConnectionStore((s) => s.agentError);
   const agentActiveCount = useConnectionStore((s) => s.agentActiveCount);
@@ -157,10 +152,7 @@ export function Hud() {
   const spinPreset = useConnectionStore((s) => s.spinPreset);
   const selectedAgentId = useConnectionStore((s) => s.selectedAgentId);
 
-  const setPaused = useConnectionStore((s) => s.setPaused);
-  const setIntensity = useConnectionStore((s) => s.setIntensity);
   const setMode = useConnectionStore((s) => s.setMode);
-  const spawnConnection = useConnectionStore((s) => s.spawnConnection);
   const clear = useConnectionStore((s) => s.clear);
   const setHome = useConnectionStore((s) => s.setHome);
   const setSelectedId = useConnectionStore((s) => s.setSelectedId);
@@ -332,7 +324,7 @@ export function Hud() {
   };
 
   const modeLabel =
-    mode === "real" ? "LIVE" : mode === "connecting" ? "LINK…" : "DEMO";
+    mode === "real" ? "LIVE" : "LINK…";
   const enabledMutes = mutedPeers.filter((p) => p.enabled).length;
   const isReplay = replayMs != null;
   const active =
@@ -521,7 +513,7 @@ export function Hud() {
             }
             active={includePrivate}
             onClick={() => void onToggleLan()}
-            disabled={lanBusy || mode === "demo"}
+            disabled={lanBusy || mode !== "real"}
           >
             <Network className="size-4" />
             <span className="hidden font-mono text-[10px] sm:inline">
@@ -568,35 +560,6 @@ export function Hud() {
               <VolumeX className="size-4" />
             )}
           </ToolBtn>
-          <ToolBtn
-            title="Pause demo traffic"
-            disabled={mode === "real"}
-            onClick={() => setPaused(!paused)}
-          >
-            {paused ? <Play className="size-4" /> : <Pause className="size-4" />}
-          </ToolBtn>
-          {mode !== "real" && (
-            <ToolBtn
-              title="Spawn a demo connection"
-              onClick={() => {
-                resumeFxAudio();
-                spawnConnection();
-              }}
-            >
-              <Zap className="size-4" />
-            </ToolBtn>
-          )}
-          {mode === "demo" && (
-            <ToolBtn
-              title="Reconnect to the traffic agent"
-              onClick={() => {
-                setMode("connecting");
-                window.location.reload();
-              }}
-            >
-              <Server className="size-4" />
-            </ToolBtn>
-          )}
           <ToolBtn title="Clear connections from the globe" onClick={() => clear()}>
             <Trash2 className="size-4" />
           </ToolBtn>
@@ -648,7 +611,7 @@ export function Hud() {
             <button
               type="button"
               onClick={() => void onToggleLan()}
-              disabled={lanBusy || mode === "demo"}
+              disabled={lanBusy || mode !== "real"}
               className={`mt-2.5 flex w-full items-center justify-between rounded-lg border px-2.5 py-2 text-left transition disabled:opacity-50 ${
                 includePrivate
                   ? "border-accent/40 bg-accent/10"
@@ -813,24 +776,6 @@ export function Hud() {
                     <span className="text-fg">{cc}</span>{" "}
                     <span className="text-primary">{n}</span>
                   </span>
-                ))}
-              </div>
-            )}
-            {mode !== "real" && (
-              <div className="mt-2 flex gap-1">
-                {(["calm", "normal", "busy"] as const).map((level) => (
-                  <button
-                    key={level}
-                    type="button"
-                    onClick={() => setIntensity(level)}
-                    className={`flex-1 rounded-md border px-1 py-1 font-mono text-[9px] uppercase ${
-                      intensity === level
-                        ? "border-primary/50 bg-primary/15 text-primary"
-                        : "border-border bg-surface text-muted"
-                    }`}
-                  >
-                    {level}
-                  </button>
                 ))}
               </div>
             )}

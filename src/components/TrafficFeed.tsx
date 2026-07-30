@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import {
   useConnectionStore,
   type TrafficDirection,
@@ -68,11 +68,6 @@ type TrafficSnapshot = {
   topTalkers?: TopTalker[];
 };
 
-const DEMO_INTERVALS: Record<"calm" | "normal" | "busy", [number, number]> = {
-  calm: [1800, 4200],
-  normal: [600, 1800],
-  busy: [180, 700],
-};
 
 function mapRow(c: TrafficSnapshot["connections"][number]) {
   return {
@@ -105,10 +100,7 @@ function mapRow(c: TrafficSnapshot["connections"][number]) {
 }
 
 export function TrafficFeed() {
-  const paused = useConnectionStore((s) => s.paused);
-  const intensity = useConnectionStore((s) => s.intensity);
   const mode = useConnectionStore((s) => s.mode);
-  const spawnConnection = useConnectionStore((s) => s.spawnConnection);
   const upsertRealConnections = useConnectionStore(
     (s) => s.upsertRealConnections,
   );
@@ -122,7 +114,6 @@ export function TrafficFeed() {
   const setIncludePrivate = useConnectionStore((s) => s.setIncludePrivate);
   const setAgents = useConnectionStore((s) => s.setAgents);
   const pushHistoryEvents = useConnectionStore((s) => s.pushHistoryEvents);
-  const demoTimer = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,7 +153,8 @@ export function TrafficFeed() {
     const fail = (msg: string) => {
       failStreak += 1;
       setAgentError(msg);
-      if (failStreak >= 3) setMode("demo");
+      // Stay in connecting — never invent fake traffic
+      if (failStreak >= 3) setMode("connecting");
     };
 
     const poll = async () => {
@@ -224,29 +216,6 @@ export function TrafficFeed() {
     pushHistoryEvents,
   ]);
 
-  useEffect(() => {
-    if (mode === "real" || mode === "connecting") {
-      if (demoTimer.current) {
-        clearTimeout(demoTimer.current);
-        demoTimer.current = null;
-      }
-      return;
-    }
-    if (paused) return;
-
-    const schedule = () => {
-      const [lo, hi] = DEMO_INTERVALS[intensity];
-      const wait = lo + Math.random() * (hi - lo);
-      demoTimer.current = window.setTimeout(() => {
-        spawnConnection();
-        schedule();
-      }, wait);
-    };
-    schedule();
-    return () => {
-      if (demoTimer.current) clearTimeout(demoTimer.current);
-    };
-  }, [mode, paused, intensity, spawnConnection]);
 
   return null;
 }
