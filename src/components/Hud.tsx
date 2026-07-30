@@ -34,6 +34,7 @@ import {
   useConnectionStore,
   type Connection,
   type SecurityPreset,
+  type SpinSpeed,
 } from "@/lib/connection-store";
 import { refreshHomeLocation } from "@/components/HomeLocator";
 import { resumeFxAudio } from "@/lib/fx-audio";
@@ -150,6 +151,7 @@ export function Hud() {
   const replayWindowMs = useConnectionStore((s) => s.replayWindowMs);
   const hostId = useConnectionStore((s) => s.hostId);
   const includePrivate = useConnectionStore((s) => s.includePrivate);
+  const spinSpeed = useConnectionStore((s) => s.spinSpeed);
 
   const setPaused = useConnectionStore((s) => s.setPaused);
   const setIntensity = useConnectionStore((s) => s.setIntensity);
@@ -169,6 +171,7 @@ export function Hud() {
   const setAlertsEnabled = useConnectionStore((s) => s.setAlertsEnabled);
   const setReplayMs = useConnectionStore((s) => s.setReplayMs);
   const setIncludePrivate = useConnectionStore((s) => s.setIncludePrivate);
+  const setSpinSpeed = useConnectionStore((s) => s.setSpinSpeed);
   const clearAlerts = useConnectionStore((s) => s.clearAlerts);
 
   const [now, setNow] = useState(() => performance.now());
@@ -377,10 +380,6 @@ export function Hud() {
               </span>
             )}
           </div>
-          <p className="mt-0.5 max-w-md text-[11px] leading-relaxed text-muted sm:text-xs">
-            Process · ASN · fat arcs · heat trails · mute · presets · replay ·
-            alerts
-          </p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <ActivitySpark samples={activityHistory} />
             <div className="flex flex-wrap gap-1">
@@ -399,15 +398,40 @@ export function Hud() {
                 </button>
               ))}
             </div>
+
+            <div className="ml-1 flex items-center gap-0.5 border-l border-border pl-2" role="group" aria-label="Globe spin speed">
+              {([
+                [0, "Off"],
+                [0.5, "Slow"],
+                [1, "Med"],
+                [2, "Fast"],
+                [3.5, "Turbo"],
+              ] as const).map(([spd, label]) => (
+                <button
+                  key={spd}
+                  type="button"
+                  data-tip={`Globe spin: ${label}`}
+                  className={`tip tip-below rounded-md border px-1.5 py-0.5 font-mono text-[9px] uppercase transition ${
+                    spinSpeed === spd
+                      ? "border-accent/50 bg-accent/15 text-accent"
+                      : "border-border bg-surface text-muted hover:border-border-strong"
+                  }`}
+                  onClick={() => setSpinSpeed(spd as SpinSpeed)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
           </div>
         </div>
 
         <div className="panel-glass flex flex-wrap items-center gap-1.5 rounded-xl px-2.5 py-1.5">
-          <ToolBtn title="Kiosk" onClick={() => setKiosk(true)}>
+          <ToolBtn title="Kiosk / full-screen NOC mode" onClick={() => setKiosk(true)}>
             <Expand className="size-4" />
           </ToolBtn>
           <ToolBtn
-            title="Replay"
+            title="Replay recent traffic history"
             active={showReplay || isReplay}
             onClick={() => {
               setShowReplay((v) => !v);
@@ -432,7 +456,7 @@ export function Hud() {
             </span>
           </ToolBtn>
           <ToolBtn
-            title="Alerts"
+            title="Toggle security alerts"
             active={alertsEnabled}
             onClick={() => setAlertsEnabled(!alertsEnabled)}
           >
@@ -448,7 +472,7 @@ export function Hud() {
             )}
           </ToolBtn>
           <ToolBtn
-            title="Muted"
+            title="Manage muted IP addresses"
             active={showMuted || enabledMutes > 0}
             warn
             onClick={() => setShowMuted((v) => !v)}
@@ -459,7 +483,7 @@ export function Hud() {
             </span>
           </ToolBtn>
           <ToolBtn
-            title="Sound"
+            title="Toggle connection sound blips"
             onClick={() => {
               resumeFxAudio();
               setSoundEnabled(!soundEnabled);
@@ -472,7 +496,7 @@ export function Hud() {
             )}
           </ToolBtn>
           <ToolBtn
-            title="Pause"
+            title="Pause demo traffic"
             disabled={mode === "real"}
             onClick={() => setPaused(!paused)}
           >
@@ -480,7 +504,7 @@ export function Hud() {
           </ToolBtn>
           {mode !== "real" && (
             <ToolBtn
-              title="Pulse"
+              title="Spawn a demo connection"
               onClick={() => {
                 resumeFxAudio();
                 spawnConnection();
@@ -491,7 +515,7 @@ export function Hud() {
           )}
           {mode === "demo" && (
             <ToolBtn
-              title="Retry agent"
+              title="Reconnect to the traffic agent"
               onClick={() => {
                 setMode("connecting");
                 window.location.reload();
@@ -500,7 +524,7 @@ export function Hud() {
               <Server className="size-4" />
             </ToolBtn>
           )}
-          <ToolBtn title="Clear" onClick={() => clear()}>
+          <ToolBtn title="Clear connections from the globe" onClick={() => clear()}>
             <Trash2 className="size-4" />
           </ToolBtn>
         </div>
@@ -989,42 +1013,60 @@ export function Hud() {
           </div>
         )}
 
-        <div className="panel-glass ticker-track overflow-hidden rounded-xl px-3 py-1.5">
+        <div className="panel-glass ticker-track rounded-xl px-3 py-2">
           <div className="flex items-center gap-3">
-            <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.14em] text-accent">
+            <span
+              className="tip tip-below shrink-0 font-mono text-[9px] uppercase tracking-[0.14em] text-accent"
+              data-tip="Live connection feed — auto-scrolls, pause on hover"
+            >
               Feed
             </span>
-            <ul className="flex min-w-0 flex-1 gap-5 overflow-x-auto">
+            <div className="min-w-0 flex-1 overflow-hidden">
               {events.length === 0 ? (
-                <li className="font-mono text-[11px] text-faint">
+                <p className="font-mono text-[11px] text-faint">
                   Waiting for peers…
-                </li>
+                </p>
               ) : (
-                events.slice(0, 12).map((ev) => (
-                  <li
-                    key={`${ev.id}-${ev.at}`}
-                    className="shrink-0 font-mono text-[11px]"
-                  >
-                    <span
-                      className={
-                        ev.direction === "inbound"
-                          ? "text-primary"
-                          : "text-warn"
-                      }
+                <div
+                  className="ticker-marquee"
+                  style={{
+                    animationDuration: `${Math.max(18, events.length * 4.5)}s`,
+                  }}
+                >
+                  {[0, 1].map((dup) => (
+                    <ul
+                      key={dup}
+                      className="flex shrink-0 items-center gap-8"
+                      aria-hidden={dup === 1}
                     >
-                      {ev.direction === "inbound" ? "↓" : "↑"}
-                    </span>{" "}
-                    <span className="text-fg">{ev.protocol}</span>
-                    <span className="text-muted">
-                      {" "}
-                      · {ev.city}
-                      {ev.process ? ` · ${ev.process}` : ""}
-                      {ev.org ? ` · ${ev.org}` : ""}
-                    </span>
-                  </li>
-                ))
+                      {events.slice(0, 16).map((ev) => (
+                        <li
+                          key={`${dup}-${ev.id}-${ev.at}`}
+                          className="shrink-0 font-mono text-[11px]"
+                        >
+                          <span
+                            className={
+                              ev.direction === "inbound"
+                                ? "text-primary"
+                                : "text-warn"
+                            }
+                          >
+                            {ev.direction === "inbound" ? "↓" : "↑"}
+                          </span>{" "}
+                          <span className="text-fg">{ev.protocol}</span>
+                          <span className="text-muted">
+                            {" "}
+                            · {ev.city}
+                            {ev.process ? ` · ${ev.process}` : ""}
+                            {ev.org ? ` · ${ev.org}` : ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ))}
+                </div>
               )}
-            </ul>
+            </div>
           </div>
         </div>
 
@@ -1146,10 +1188,11 @@ function ToolBtn({
   return (
     <button
       type="button"
-      title={title}
+      data-tip={title}
+      aria-label={title}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-sm transition disabled:opacity-40 ${
+      className={`tip tip-below inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-sm transition disabled:opacity-40 ${
         active
           ? warn
             ? "border-warn/40 bg-warn/10 text-warn"

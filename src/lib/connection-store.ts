@@ -21,6 +21,9 @@ export type TrafficDirection = "inbound" | "outbound";
 
 export type SecurityPreset = "all" | "security" | "web" | "noise-off";
 
+/** 0 = paused, 0.5 slow, 1 normal, 2 fast, 3.5 turbo */
+export type SpinSpeed = 0 | 0.5 | 1 | 2 | 3.5;
+
 export type Connection = {
   id: string;
   ip: string;
@@ -159,6 +162,18 @@ const CDN_ORGS =
 const NOISE_PROTO = /^(DNS|NTP|PING|ICMP|QUIC)$/i;
 const SECURITY_PORTS = new Set([22, 23, 3389, 5900, 445, 21, 3306, 5432, 27017]);
 
+const SPIN_KEY = "earthlink-spin-speed";
+
+function loadSpin(): SpinSpeed {
+  try {
+    const v = Number(localStorage.getItem(SPIN_KEY));
+    if (v === 0 || v === 0.5 || v === 1 || v === 2 || v === 3.5) return v;
+  } catch {
+    /* ignore */
+  }
+  return 1;
+}
+
 type State = {
   home: Home;
   homeReady: boolean;
@@ -189,6 +204,7 @@ type State = {
   trails: TrailPoint[];
   multiHosts: string[];
   includePrivate: boolean;
+  spinSpeed: SpinSpeed;
   seenCountries: Set<string>;
   seenSshSubnets: Set<string>;
   setHome: (home: Partial<Home> & { lat: number; lon: number }) => void;
@@ -208,6 +224,7 @@ type State = {
   setTopTalkers: (t: TopTalker[]) => void;
   setHostId: (id: string | null) => void;
   setIncludePrivate: (on: boolean) => void;
+  setSpinSpeed: (s: SpinSpeed) => void;
   pushHistoryEvents: (evs: HistoryEvent[]) => void;
   hydrateMutes: () => void;
   muteIp: (ip: string, meta?: { label?: string; note?: string }) => void;
@@ -371,6 +388,7 @@ export const useConnectionStore = create<State>((set, get) => ({
   trails: [],
   multiHosts: [],
   includePrivate: false,
+  spinSpeed: typeof window !== "undefined" ? loadSpin() : 1,
   seenCountries: new Set(),
   seenSshSubnets: new Set(),
 
@@ -405,6 +423,14 @@ export const useConnectionStore = create<State>((set, get) => ({
   setTopTalkers: (topTalkers) => set({ topTalkers }),
   setHostId: (hostId) => set({ hostId }),
   setIncludePrivate: (includePrivate) => set({ includePrivate }),
+  setSpinSpeed: (spinSpeed) => {
+    try {
+      localStorage.setItem(SPIN_KEY, String(spinSpeed));
+    } catch {
+      /* ignore */
+    }
+    set({ spinSpeed });
+  },
   pushHistoryEvents: (evs) =>
     set((s) => {
       if (!evs.length) return s;

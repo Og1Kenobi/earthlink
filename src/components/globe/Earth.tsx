@@ -10,6 +10,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { buildPoliticalTexture } from "@/lib/political-texture";
 import type { GeoJsonFeatureCollection } from "@/lib/sphere-geo";
+import { useConnectionStore } from "@/lib/connection-store";
 
 const EARTH_RADIUS = 2;
 
@@ -79,39 +80,14 @@ function PoliticalGlobe({ children }: { children?: ReactNode }) {
       <mesh material={mat}>
         <sphereGeometry args={[EARTH_RADIUS, 96, 96]} />
       </mesh>
-      {/* Neon rim atmosphere */}
-      <mesh scale={1.018}>
+      {/* Soft limb glow */}
+      <mesh scale={1.012}>
         <sphereGeometry args={[EARTH_RADIUS, 64, 64]} />
         <meshBasicMaterial
-          color="#22d3ee"
+          color="#38bdf8"
           transparent
           opacity={0.07}
           side={THREE.BackSide}
-          depthWrite={false}
-          toneMapped={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </mesh>
-      <mesh scale={1.045}>
-        <sphereGeometry args={[EARTH_RADIUS, 48, 48]} />
-        <meshBasicMaterial
-          color="#0ea5e9"
-          transparent
-          opacity={0.09}
-          side={THREE.BackSide}
-          depthWrite={false}
-          toneMapped={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </mesh>
-      {/* Faint tech wire */}
-      <mesh scale={1.004}>
-        <sphereGeometry args={[EARTH_RADIUS, 36, 36]} />
-        <meshBasicMaterial
-          color="#67e8f9"
-          wireframe
-          transparent
-          opacity={0.035}
           depthWrite={false}
           toneMapped={false}
         />
@@ -121,6 +97,9 @@ function PoliticalGlobe({ children }: { children?: ReactNode }) {
   );
 }
 
+/** Base radians/sec multiplier at spinSpeed = 1 */
+const SPIN_BASE = 0.028;
+
 export function Earth({
   autoRotate = true,
   children,
@@ -129,6 +108,7 @@ export function Earth({
   children?: ReactNode;
 }) {
   const group = useRef<THREE.Group>(null);
+  const spinSpeed = useConnectionStore((s) => s.spinSpeed);
 
   useLayoutEffect(() => {
     if (group.current) {
@@ -138,8 +118,8 @@ export function Earth({
   }, []);
 
   useFrame((_, delta) => {
-    if (!autoRotate || !group.current) return;
-    group.current.rotation.y += Math.min(delta, 0.05) * 0.028;
+    if (!autoRotate || !group.current || spinSpeed <= 0) return;
+    group.current.rotation.y += Math.min(delta, 0.05) * SPIN_BASE * spinSpeed;
   });
 
   return (
