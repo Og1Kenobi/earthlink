@@ -59,6 +59,11 @@ const UDP_PORT_PROTO = {
 
 const EPHEMERAL_MIN = 32768;
 
+/** Skip sudo conntrack after it fails (avoids journal spam). */
+let conntrackSudoOk = null; // null unknown, true works, false no
+let conntrackSudoRetryAt = 0;
+const CONNTRACK_SUDO_RETRY_MS = 10 * 60 * 1000;
+
 export function protocolForPort(port, transport = "tcp") {
   if (transport === "icmp") return "PING";
   if (transport === "udp") {
@@ -419,29 +424,57 @@ async function readLocalIps() {
   return ips;
 }
 
-async function execConntrackList() {
-  const bins = [
-    ["sudo", ["-n", "conntrack", "-L"]],
-    ["sudo", ["-n", "/usr/sbin/conntrack", "-L"]],
-    ["conntrack", ["-L"]],
-    ["/usr/sbin/conntrack", ["-L"]],
-  ];
-  for (const [bin, args] of bins) {
-    try {
-      const r = await execFileAsync(bin, args, {
-        timeout: 5000,
-        maxBuffer: 8 * 1024 * 1024,
-      });
-      if (r.stdout) return r.stdout;
-    } catch {
-      // try next
-    }
-  }
+async function tryExec(bin, args) {
   try {
-    return await fs.readFile("/proc/net/nf_conntrack", "utf8");
+    const r = await execFileAsync(bin, args, {
+      timeout: 5000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return r.stdout || "";
   } catch {
     return "";
   }
+}
+
+async function execConntrackList() {
+  // Prefer /proc (no sudo, no spam)
+  try {
+    const text = await fs.readFile("/proc/net/nf_conntrack", "utf8");
+    if (text) return text;
+  } catch {
+    // missing on many systems
+  }
+
+  // Plain conntrack (may work if already root / caps)
+  for (const bin of ["conntrack", "/usr/sbin/conntrack", "/sbin/conntrack"]) {
+    const out = await tryExec(bin, ["-L"]);
+    if (out) return out;
+  }
+
+  // sudo -n only when not known-bad (or retry after cooldown)
+  const now = Date.now();
+  const canTrySudo =
+    conntrackSudoOk === true ||
+    (conntrackSudoOk !== false && now >= conntrackSudoRetryAt) ||
+    (conntrackSudoOk === false && now >= conntrackSudoRetryAt);
+
+  if (canTrySudo && process.env.EARTHLINK_SKIP_CONNTRACK_SUDO !== "1") {
+    for (const [bin, args] of [
+      ["sudo", ["-n", "conntrack", "-L"]],
+      ["sudo", ["-n", "/usr/sbin/conntrack", "-L"]],
+    ]) {
+      const out = await tryExec(bin, args);
+      if (out) {
+        conntrackSudoOk = true;
+        return out;
+      }
+    }
+    // Failed — back off so journal is not flooded every poll
+    conntrackSudoOk = false;
+    conntrackSudoRetryAt = now + CONNTRACK_SUDO_RETRY_MS;
+  }
+
+  return "";
 }
 
 async function readFromConntrack() {
