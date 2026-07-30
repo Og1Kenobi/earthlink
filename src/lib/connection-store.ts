@@ -155,6 +155,9 @@ export type TopTalker = {
   bytes: number;
   bytesPerSec: number;
   direction: string;
+  hostId?: string;
+  os?: string;
+  isPrivate?: boolean;
 };
 
 type RealRow = {
@@ -259,8 +262,11 @@ type State = {
   agents: AgentInfo[];
   includePrivate: boolean;
   spinPreset: SpinPreset;
+  /** null = all agents; set to a hostId to focus that machine */
+  selectedAgentId: string | null;
   seenCountries: Set<string>;
   seenSshSubnets: Set<string>;
+
   setHome: (home: Partial<Home> & { lat: number; lon: number }) => void;
   setHomeReady: (ready: boolean) => void;
   setPaused: (paused: boolean) => void;
@@ -280,7 +286,9 @@ type State = {
   setIncludePrivate: (on: boolean) => void;
   setAgents: (a: AgentInfo[]) => void;
   setSpinPreset: (p: SpinPreset) => void;
+  setSelectedAgentId: (id: string | null) => void;
   pushHistoryEvents: (evs: HistoryEvent[]) => void;
+
   hydrateMutes: () => void;
   muteIp: (ip: string, meta?: { label?: string; note?: string }) => void;
   unmuteIp: (ip: string) => void;
@@ -394,6 +402,18 @@ export function matchesSecurityPreset(
   return true;
 }
 
+/** Filter globe/list to one edge agent (or hub). null = all. */
+export function matchesAgentFilter(
+  c: { hostId?: string | null },
+  selectedAgentId: string | null,
+  hubHostId?: string | null,
+): boolean {
+  if (!selectedAgentId) return true;
+  const hid = c.hostId || hubHostId || "local";
+  return hid === selectedAgentId;
+}
+
+
 export function protocolWeight(protocol: string, bytesPerSec = 0): number {
   const p = (protocol || "").toUpperCase();
   let base = 0.95;
@@ -445,8 +465,10 @@ export const useConnectionStore = create<State>((set, get) => ({
   includePrivate: false,
   agents: [],
   spinPreset: "med",
+  selectedAgentId: null,
   seenCountries: new Set(),
   seenSshSubnets: new Set(),
+
 
   setHome: (home) =>
     set((s) => ({
@@ -490,6 +512,7 @@ export const useConnectionStore = create<State>((set, get) => ({
     }
     set({ spinPreset });
   },
+  setSelectedAgentId: (selectedAgentId) => set({ selectedAgentId }),
   pushHistoryEvents: (evs) =>
     set((s) => {
       if (!evs.length) return s;

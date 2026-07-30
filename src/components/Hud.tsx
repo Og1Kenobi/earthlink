@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import {
   isIpMuted,
+  matchesAgentFilter,
   matchesSecurityPreset,
   useConnectionStore,
   type Connection,
@@ -154,6 +155,7 @@ export function Hud() {
   const includePrivate = useConnectionStore((s) => s.includePrivate);
   const agents = useConnectionStore((s) => s.agents);
   const spinPreset = useConnectionStore((s) => s.spinPreset);
+  const selectedAgentId = useConnectionStore((s) => s.selectedAgentId);
 
   const setPaused = useConnectionStore((s) => s.setPaused);
   const setIntensity = useConnectionStore((s) => s.setIntensity);
@@ -174,6 +176,7 @@ export function Hud() {
   const setReplayMs = useConnectionStore((s) => s.setReplayMs);
   const setIncludePrivate = useConnectionStore((s) => s.setIncludePrivate);
   const setSpinPreset = useConnectionStore((s) => s.setSpinPreset);
+  const setSelectedAgentId = useConnectionStore((s) => s.setSelectedAgentId);
   const clearAlerts = useConnectionStore((s) => s.clearAlerts);
 
   const [now, setNow] = useState(() => performance.now());
@@ -220,8 +223,9 @@ export function Hud() {
     () =>
       connections
         .filter((c) => !isIpMuted(c.ip, mutedPeers))
-        .filter((c) => matchesSecurityPreset(c, securityPreset)),
-    [connections, mutedPeers, securityPreset],
+        .filter((c) => matchesSecurityPreset(c, securityPreset))
+        .filter((c) => matchesAgentFilter(c, selectedAgentId, hostId)),
+    [connections, mutedPeers, securityPreset, selectedAgentId, hostId],
   );
 
   const filtered = useMemo(
@@ -614,26 +618,70 @@ export function Hud() {
 
             {agents.length > 0 && (
               <div className="mt-2 border-t border-border pt-2">
-                <p className="text-[9px] uppercase text-faint">Agents</p>
-                <ul className="mt-1 space-y-0.5">
-                  {agents.slice(0, 5).map((a) => (
-                    <li
-                      key={a.hostId}
-                      className="flex justify-between gap-1 font-mono text-[10px] text-muted"
+                <div className="flex items-center justify-between gap-1">
+                  <p className="text-[9px] uppercase text-faint">Agents</p>
+                  {selectedAgentId && (
+                    <button
+                      type="button"
+                      className="font-mono text-[9px] text-accent hover:underline"
+                      onClick={() => setSelectedAgentId(null)}
+                      title="Show connections from all agents"
                     >
-                      <span className="truncate text-fg">
-                        {a.hostId}
-                        <span className="text-faint">
-                          {" "}
-                          · {a.osLabel || a.os || "?"}
-                        </span>
-                      </span>
-                      <span className={a.stale ? "text-danger" : "text-primary"}>
-                        {a.local ? "hub" : a.stale ? "stale" : a.socketCount ?? 0}
-                      </span>
-                    </li>
-                  ))}
+                      All
+                    </button>
+                  )}
+                </div>
+                <ul className="mt-1 space-y-0.5">
+                  {agents.slice(0, 8).map((a) => {
+                    const active = selectedAgentId === a.hostId;
+                    return (
+                      <li key={a.hostId}>
+                        <button
+                          type="button"
+                          title={
+                            active
+                              ? "Showing only this agent — click to clear"
+                              : `Show only ${a.hostId} connections`
+                          }
+                          onClick={() =>
+                            setSelectedAgentId(active ? null : a.hostId)
+                          }
+                          className={`flex w-full items-center justify-between gap-1 rounded-md px-1 py-0.5 text-left font-mono text-[10px] transition ${
+                            active
+                              ? "bg-accent/15 text-accent ring-1 ring-accent/40"
+                              : "text-muted hover:bg-surface hover:text-fg"
+                          }`}
+                        >
+                          <span className="min-w-0 truncate">
+                            <span className={active ? "text-accent" : "text-fg"}>
+                              {a.hostId}
+                            </span>
+                            <span className="text-faint">
+                              {" "}
+                              · {a.osLabel || a.os || "?"}
+                            </span>
+                          </span>
+                          <span
+                            className={
+                              a.stale
+                                ? "text-danger"
+                                : active
+                                  ? "text-accent"
+                                  : "text-primary"
+                            }
+                          >
+                            {a.local ? "hub" : a.stale ? "stale" : a.socketCount ?? 0}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
+                {selectedAgentId && (
+                  <p className="mt-1 font-mono text-[9px] text-accent">
+                    Filter: {selectedAgentId}
+                  </p>
+                )}
               </div>
             )}
 
@@ -694,7 +742,17 @@ export function Hud() {
               {topTalkers.length === 0 ? (
                 <li className="text-[11px] text-muted">Waiting for rates…</li>
               ) : (
-                topTalkers.slice(0, 4).map((t) => (
+                topTalkers
+                  .filter((t) =>
+                    matchesAgentFilter(
+                      { hostId: t.hostId },
+                      selectedAgentId,
+                      hostId,
+                    ),
+                  )
+                  .slice(0, 4)
+                  .map((t) => (
+
                   <li key={t.ip} className="font-mono text-[10px]">
                     <div className="flex justify-between gap-1 text-fg">
                       <span className="truncate">
