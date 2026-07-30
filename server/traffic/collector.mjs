@@ -20,6 +20,37 @@ const HOST_ID =
   process.env.HOSTNAME ||
   "local";
 
+/** Stable jitter near home so LAN peers are visible on the globe. */
+function privateGeoNearHome(ip, home) {
+  let h = 0;
+  for (let i = 0; i < ip.length; i++) h = (h * 33 + ip.charCodeAt(i)) | 0;
+  const a = ((h % 360) + 360) % 360;
+  const rad = (a * Math.PI) / 180;
+  const ring = 0.08 + (Math.abs(h) % 50) * 0.004; // ~0.08–0.28°
+  const baseLat = home?.lat ?? 0;
+  const baseLon = home?.lon ?? 0;
+  const subnet =
+    ip.startsWith("10.")
+      ? "10.x"
+      : ip.startsWith("192.168.")
+        ? "192.168.x"
+        : /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)
+          ? "172.16–31.x"
+          : "private";
+  return {
+    lat: baseLat + Math.sin(rad) * ring,
+    lon: baseLon + Math.cos(rad) * ring,
+    city: "LAN",
+    country: "Local",
+    region: subnet,
+    private: true,
+    org: `Private · ${subnet}`,
+    as: null,
+    asn: null,
+    isp: null,
+  };
+}
+
 /**
  * Live traffic collector — full NOC data:
  * process names, ASN/org, bytes, iface filter, access-log correlate, event history.
@@ -28,7 +59,9 @@ export function createTrafficCollector(options = {}) {
   const pollMs = options.pollMs ?? Number(process.env.EARTHLINK_POLL_MS || 1000);
   const lingerMs =
     options.lingerMs ?? Number(process.env.EARTHLINK_LINGER_MS || 6000);
-  const includePrivate = options.includePrivate ?? false;
+  /** Runtime toggle (env is initial default). */
+  let includePrivate =
+    options.includePrivate ?? process.env.EARTHLINK_INCLUDE_PRIVATE === "1";
   const maxConnections = options.maxConnections ?? 160;
   const directions =
     options.directions ?? process.env.EARTHLINK_DIRECTIONS ?? "both";
@@ -118,6 +151,21 @@ export function createTrafficCollector(options = {}) {
     return [...mutedIps].sort();
   }
 
+  function getIncludePrivate() {
+    return includePrivate;
+  }
+
+  function setIncludePrivate(on) {
+    includePrivate = Boolean(on);
+    if (!includePrivate) {
+      // drop private rows immediately
+      for (const [k, v] of active) {
+        if (v.isPrivate || isPrivateIp(v.ip)) active.delete(k);
+      }
+    }
+    return includePrivate;
+  }
+
   function pushHistory(ev) {
     history.push(ev);
     const cutoff = Date.now() - historyKeepMs;
@@ -174,12 +222,21 @@ export function createTrafficCollector(options = {}) {
         return !s.private && !isPrivateIp(s.remoteIp);
       });
 
-      const geos = await lookupMany(candidates.map((s) => s.remoteIp));
+      const publicIps = candidates
+        .filter((s) => !s.private && !isPrivateIp(s.remoteIp))
+        .map((s) => s.remoteIp);
+      const geos = await lookupMany(publicIps);
       const seenKeys = new Set();
 
       for (const s of candidates) {
-        const geo = geos.get(s.remoteIp);
-        if (!geo || geo.private || geo.lat == null || geo.lon == null) continue;
+        const isPriv = Boolean(s.private || isPrivateIp(s.remoteIp));
+        let geo = geos.get(s.remoteIp);
+        if (isPriv) {
+          if (!includePrivate) continue;
+          geo = privateGeoNearHome(s.remoteIp, home);
+        } else if (!geo || geo.lat == null || geo.lon == null) {
+          continue;
+        }
 
         const proc = resolveProcess(s, processMap);
         const logHit = accessLog.lookup(s.remoteIp);
@@ -204,15 +261,25 @@ export function createTrafficCollector(options = {}) {
           existing.asn = geo.asn ?? existing.asn;
           existing.isp = geo.isp ?? existing.isp;
           existing.iface = s.iface ?? existing.iface;
+          existing.isPrivate = isPriv;
+          existing.city = geo.city;
+          existing.country = geo.country;
+          existing.lat = geo.lat;
+          existing.lon = geo.lon;
           existing.bytes = Math.max(existing.bytes || 0, bytes);
           if (logHit) {
             existing.httpPath = logHit.path;
             existing.httpMethod = logHit.method;
             existing.httpStatus = logHit.status;
           }
-          // crude rate
-          const dt = Math.max(0.001, (now - (existing._rateAt || existing.createdAt)) / 1000);
-          const dBytes = Math.max(0, (existing.bytes || 0) - (existing._prevBytes || 0));
+          const dt = Math.max(
+            0.001,
+            (now - (existing._rateAt || existing.createdAt)) / 1000,
+          );
+          const dBytes = Math.max(
+            0,
+            (existing.bytes || 0) - (existing._prevBytes || 0),
+          );
           existing.bytesPerSec = dBytes / dt;
           existing._prevBytes = existing.bytes;
           existing._rateAt = now;
@@ -244,6 +311,7 @@ export function createTrafficCollector(options = {}) {
             httpPath: logHit?.path || null,
             httpMethod: logHit?.method || null,
             httpStatus: logHit?.status || null,
+            isPrivate: isPriv,
             bytes,
             bytesPerSec: 0,
             _prevBytes: bytes,
@@ -271,6 +339,7 @@ export function createTrafficCollector(options = {}) {
             org: row.org,
             asn: row.asn,
             hostId: HOST_ID,
+            isPrivate: isPriv,
           });
         }
       }
@@ -294,6 +363,7 @@ export function createTrafficCollector(options = {}) {
             org: conn.org,
             asn: conn.asn,
             hostId: HOST_ID,
+            isPrivate: conn.isPrivate,
           });
         }
       }
@@ -359,6 +429,7 @@ export function createTrafficCollector(options = {}) {
           httpPath: c.httpPath,
           httpMethod: c.httpMethod,
           httpStatus: c.httpStatus,
+          isPrivate: Boolean(c.isPrivate),
           bytes: c.bytes || 0,
           bytesPerSec: c.bytesPerSec || 0,
           createdAt: c.createdAt,
@@ -378,7 +449,6 @@ export function createTrafficCollector(options = {}) {
     const inboundCount = live.filter((c) => c.direction === "inbound").length;
     const outboundCount = live.filter((c) => c.direction === "outbound").length;
 
-    // top talkers (by bytesPerSec then bytes)
     const topTalkers = [...live]
       .sort(
         (a, b) =>
@@ -396,6 +466,7 @@ export function createTrafficCollector(options = {}) {
         bytes: c.bytes,
         bytesPerSec: c.bytesPerSec,
         direction: c.direction,
+        isPrivate: c.isPrivate,
       }));
 
     return {
@@ -415,10 +486,12 @@ export function createTrafficCollector(options = {}) {
       mutedIps: listMuted(),
       topTalkers,
       hostId: HOST_ID,
+      includePrivate,
       ifaces: ifaceFilter ? [...ifaceFilter] : null,
       accessLog: accessLog.path || null,
       serverTime: now,
-      hostname: process.env.EARTHLINK_HOSTNAME || process.env.HOSTNAME || undefined,
+      hostname:
+        process.env.EARTHLINK_HOSTNAME || process.env.HOSTNAME || undefined,
       listenHint: process.env.EARTHLINK_LISTEN || "0.0.0.0:8080",
     };
   }
@@ -455,6 +528,8 @@ export function createTrafficCollector(options = {}) {
     listMuted,
     isMuted,
     getHistory,
+    getIncludePrivate,
+    setIncludePrivate,
     hostId: HOST_ID,
   };
 }

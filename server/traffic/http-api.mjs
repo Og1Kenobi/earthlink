@@ -83,9 +83,39 @@ export async function handleTrafficApi(req, res, urlPath) {
       home: snap.home,
       mutedIps: snap.mutedIps ?? [],
       hostId: snap.hostId,
+      includePrivate: snap.includePrivate,
       topTalkers: snap.topTalkers?.slice(0, 5),
     });
     return true;
+  }
+
+  if (path === "/api/traffic/settings") {
+    const c = getCollector();
+    if (method === "GET") {
+      sendJson(res, 200, {
+        ok: true,
+        includePrivate: c.getIncludePrivate(),
+        mutedIps: c.listMuted(),
+      });
+      return true;
+    }
+    if (method === "POST") {
+      try {
+        const body = await readBody(req);
+        if (typeof body.includePrivate === "boolean") {
+          c.setIncludePrivate(body.includePrivate);
+        }
+        sendJson(res, 200, {
+          ok: true,
+          includePrivate: c.getIncludePrivate(),
+          mutedIps: c.listMuted(),
+        });
+        return true;
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: e?.message ?? "bad body" });
+        return true;
+      }
+    }
   }
 
   if (path === "/api/traffic/history") {

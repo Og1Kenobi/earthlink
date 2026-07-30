@@ -49,6 +49,7 @@ export type Connection = {
   httpMethod?: string | null;
   hostId?: string;
   transport?: string;
+  isPrivate?: boolean;
 };
 
 export type TrafficEvent = {
@@ -150,6 +151,7 @@ type RealRow = {
   bytesPerSec?: number;
   hostId?: string;
   transport?: string;
+  isPrivate?: boolean;
 };
 
 const CDN_ORGS =
@@ -182,10 +184,11 @@ type State = {
   alerts: AlertItem[];
   alertsEnabled: boolean;
   history: HistoryEvent[];
-  replayMs: number | null; // null = live
+  replayMs: number | null;
   replayWindowMs: number;
   trails: TrailPoint[];
-  multiHosts: string[]; // extra agent base URLs
+  multiHosts: string[];
+  includePrivate: boolean;
   seenCountries: Set<string>;
   seenSshSubnets: Set<string>;
   setHome: (home: Partial<Home> & { lat: number; lon: number }) => void;
@@ -204,6 +207,7 @@ type State = {
   setReplayMs: (ms: number | null) => void;
   setTopTalkers: (t: TopTalker[]) => void;
   setHostId: (id: string | null) => void;
+  setIncludePrivate: (on: boolean) => void;
   pushHistoryEvents: (evs: HistoryEvent[]) => void;
   hydrateMutes: () => void;
   muteIp: (ip: string, meta?: { label?: string; note?: string }) => void;
@@ -326,7 +330,6 @@ export function protocolWeight(protocol: string, bytesPerSec = 0): number {
     base = 0.7;
   else if (p.includes("HTTPS") || p.includes("HTTP")) base = 1.1;
   else if (p.includes("QUIC")) base = 1.0;
-  // bandwidth boost
   if (bytesPerSec > 500_000) base *= 1.8;
   else if (bytesPerSec > 50_000) base *= 1.35;
   else if (bytesPerSec > 5_000) base *= 1.15;
@@ -367,6 +370,7 @@ export const useConnectionStore = create<State>((set, get) => ({
   replayWindowMs: 45 * 60 * 1000,
   trails: [],
   multiHosts: [],
+  includePrivate: false,
   seenCountries: new Set(),
   seenSshSubnets: new Set(),
 
@@ -400,6 +404,7 @@ export const useConnectionStore = create<State>((set, get) => ({
   setReplayMs: (replayMs) => set({ replayMs }),
   setTopTalkers: (topTalkers) => set({ topTalkers }),
   setHostId: (hostId) => set({ hostId }),
+  setIncludePrivate: (includePrivate) => set({ includePrivate }),
   pushHistoryEvents: (evs) =>
     set((s) => {
       if (!evs.length) return s;
@@ -632,6 +637,7 @@ export const useConnectionStore = create<State>((set, get) => ({
             bytesPerSec: row.bytesPerSec ?? prev.bytesPerSec,
             hostId: row.hostId ?? prev.hostId,
             transport: row.transport ?? prev.transport,
+            isPrivate: row.isPrivate ?? prev.isPrivate,
             ttl: row.live
               ? Math.max(prev.ttl, now - prev.createdAt + 60_000)
               : now - prev.createdAt + (row.lingerMs ?? linger),
@@ -673,6 +679,7 @@ export const useConnectionStore = create<State>((set, get) => ({
             httpMethod: row.httpMethod,
             hostId: row.hostId,
             transport: row.transport,
+            isPrivate: row.isPrivate,
           });
           if (isNew && !muted) {
             if (soundEnabled) playConnectionBlip(direction, row.protocol);
@@ -706,7 +713,7 @@ export const useConnectionStore = create<State>((set, get) => ({
               direction,
             });
 
-            if (alertsEnabled) {
+            if (alertsEnabled && !row.isPrivate) {
               if (row.country && !countries.has(row.country)) {
                 countries.add(row.country);
                 alerts = pushAlert(
@@ -728,9 +735,6 @@ export const useConnectionStore = create<State>((set, get) => ({
                     `SSH from new subnet ${net} · ${row.city}, ${row.country}`,
                   );
                 }
-              }
-              if ((row.protocol || "").toUpperCase() === "DNS") {
-                // mild info — spikes handled elsewhere if needed
               }
             }
           }

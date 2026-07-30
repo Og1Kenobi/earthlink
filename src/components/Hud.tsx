@@ -15,6 +15,7 @@ import {
   History,
   MapPin,
   Minimize2,
+  Network,
   Pause,
   Play,
   Plus,
@@ -36,7 +37,11 @@ import {
 } from "@/lib/connection-store";
 import { refreshHomeLocation } from "@/components/HomeLocator";
 import { resumeFxAudio } from "@/lib/fx-audio";
-import { pullServerMutes, syncMuteToServer } from "@/lib/server-mute";
+import {
+  pullServerMutes,
+  setServerIncludePrivate,
+  syncMuteToServer,
+} from "@/lib/server-mute";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -62,6 +67,8 @@ const STATIC_FILTERS: { value: ConnFilter; label: string }[] = [
   { value: "live", label: "Live only" },
   { value: "inbound", label: "Inbound" },
   { value: "outbound", label: "Outbound" },
+  { value: "private", label: "Internal / LAN" },
+  { value: "public", label: "Public only" },
   { value: "proto:DNS", label: "DNS" },
   { value: "proto:PING", label: "Ping" },
   { value: "proto:HTTPS", label: "HTTPS" },
@@ -74,6 +81,8 @@ function matchesFilter(c: Connection, filter: ConnFilter): boolean {
   if (filter === "live") return c.live !== false;
   if (filter === "inbound") return c.direction === "inbound";
   if (filter === "outbound") return c.direction !== "inbound";
+  if (filter === "private") return Boolean(c.isPrivate);
+  if (filter === "public") return !c.isPrivate;
   if (filter.startsWith("proto:")) {
     const want = filter.slice(6).toUpperCase();
     const p = (c.protocol || "").toUpperCase();
@@ -140,6 +149,7 @@ export function Hud() {
   const replayMs = useConnectionStore((s) => s.replayMs);
   const replayWindowMs = useConnectionStore((s) => s.replayWindowMs);
   const hostId = useConnectionStore((s) => s.hostId);
+  const includePrivate = useConnectionStore((s) => s.includePrivate);
 
   const setPaused = useConnectionStore((s) => s.setPaused);
   const setIntensity = useConnectionStore((s) => s.setIntensity);
@@ -158,6 +168,7 @@ export function Hud() {
   const setKiosk = useConnectionStore((s) => s.setKiosk);
   const setAlertsEnabled = useConnectionStore((s) => s.setAlertsEnabled);
   const setReplayMs = useConnectionStore((s) => s.setReplayMs);
+  const setIncludePrivate = useConnectionStore((s) => s.setIncludePrivate);
   const clearAlerts = useConnectionStore((s) => s.clearAlerts);
 
   const [now, setNow] = useState(() => performance.now());
@@ -166,6 +177,7 @@ export function Hud() {
   const [muteInput, setMuteInput] = useState("");
   const [showMuted, setShowMuted] = useState(true);
   const [showReplay, setShowReplay] = useState(false);
+  const [lanBusy, setLanBusy] = useState(false);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(performance.now()), 200);
@@ -246,6 +258,19 @@ export function Hud() {
     void syncMuteToServer(enabled ? "mute" : "unmute", ip);
   };
 
+  const onToggleLan = async () => {
+    if (lanBusy) return;
+    const next = !includePrivate;
+    setLanBusy(true);
+    setIncludePrivate(next); // optimistic
+    try {
+      const confirmed = await setServerIncludePrivate(next);
+      if (confirmed != null) setIncludePrivate(confirmed);
+    } finally {
+      setLanBusy(false);
+    }
+  };
+
   const onRelocate = async () => {
     setLocating(true);
     try {
@@ -274,8 +299,10 @@ export function Hud() {
               <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
                 {modeLabel}
               </span>
-              {hostId && (
-                <span className="font-mono text-[10px] text-faint">{hostId}</span>
+              {includePrivate && (
+                <span className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-mono text-[10px] text-accent">
+                  LAN
+                </span>
               )}
             </div>
             <div className="mt-2 flex gap-6 font-mono text-sm">
@@ -311,7 +338,6 @@ export function Hud() {
                 <span className="text-muted">
                   {" "}
                   · {ev.city}, {ev.country}
-                  {ev.process ? ` · ${ev.process}` : ""}
                 </span>
               </li>
             ))}
@@ -345,6 +371,11 @@ export function Hud() {
               )}
               {isReplay ? "REPLAY" : modeLabel}
             </span>
+            {includePrivate && (
+              <span className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-mono text-[10px] text-accent">
+                LAN on
+              </span>
+            )}
           </div>
           <p className="mt-0.5 max-w-md text-[11px] leading-relaxed text-muted sm:text-xs">
             Process · ASN · fat arcs · heat trails · mute · presets · replay ·
@@ -384,6 +415,21 @@ export function Hud() {
             }}
           >
             <History className="size-4" />
+          </ToolBtn>
+          <ToolBtn
+            title={
+              includePrivate
+                ? "Hide internal / LAN IPs"
+                : "Show internal / LAN IPs"
+            }
+            active={includePrivate}
+            onClick={() => void onToggleLan()}
+            disabled={lanBusy || mode === "demo"}
+          >
+            <Network className="size-4" />
+            <span className="hidden font-mono text-[10px] sm:inline">
+              {includePrivate ? "LAN" : "LAN"}
+            </span>
           </ToolBtn>
           <ToolBtn
             title="Alerts"
@@ -460,9 +506,7 @@ export function Hud() {
         </div>
       </header>
 
-      {/* Middle band: height-capped so left never blows past the viewport */}
       <div className="pointer-events-none relative flex min-h-0 flex-1 items-stretch justify-between gap-3 overflow-hidden py-2">
-        {/* LEFT — compact, height-limited, only internal scroll if needed */}
         <aside className="pointer-events-auto flex w-[min(100%,15.75rem)] shrink-0 flex-col gap-2 self-stretch overflow-y-auto overscroll-contain [scrollbar-width:thin]">
           <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
             <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-faint">
@@ -501,6 +545,49 @@ export function Hud() {
                 </p>
               </div>
             </div>
+
+            {/* Internal IP toggle */}
+            <button
+              type="button"
+              onClick={() => void onToggleLan()}
+              disabled={lanBusy || mode === "demo"}
+              className={`mt-2.5 flex w-full items-center justify-between rounded-lg border px-2.5 py-2 text-left transition disabled:opacity-50 ${
+                includePrivate
+                  ? "border-accent/40 bg-accent/10"
+                  : "border-border bg-surface-elevated hover:border-border-strong"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Network
+                  className={`size-3.5 ${includePrivate ? "text-accent" : "text-faint"}`}
+                />
+                <span className="text-[11px] font-medium text-fg">
+                  Internal IPs
+                </span>
+              </span>
+              <span
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${
+                  includePrivate ? "bg-accent" : "bg-border-strong"
+                }`}
+              >
+                <span
+                  className={`inline-block size-3.5 rounded-full bg-white shadow transition ${
+                    includePrivate ? "translate-x-4.5 ml-0.5" : "ml-0.5"
+                  }`}
+                  style={{
+                    transform: includePrivate
+                      ? "translateX(1.125rem)"
+                      : "translateX(0)",
+                  }}
+                />
+              </span>
+            </button>
+            <p className="mt-1 font-mono text-[9px] leading-snug text-faint">
+              {includePrivate
+                ? "LAN peers plotted near home (10.x / 192.168.x / …)"
+                : "Only public remotes (default)"}
+            </p>
+
             {(enabledMutes > 0 || mutedActiveCount > 0) && (
               <p className="mt-1.5 font-mono text-[10px] text-faint">
                 {enabledMutes} muted
@@ -815,6 +902,11 @@ export function Hud() {
                           >
                             {inbound ? "in" : "out"}
                           </span>
+                          {c.isPrivate && (
+                            <span className="mr-1 inline-flex rounded px-1 py-0.5 font-mono text-[9px] uppercase bg-accent/15 text-accent">
+                              lan
+                            </span>
+                          )}
                           {c.city}
                           <span className="ml-1 font-normal text-muted">
                             {c.country}
@@ -833,7 +925,11 @@ export function Hud() {
                           </p>
                         )}
                         <div className="mt-0.5 flex justify-between text-[10px] text-muted">
-                          <span>{c.distanceKm.toLocaleString()} km</span>
+                          <span>
+                            {c.isPrivate
+                              ? "local"
+                              : `${c.distanceKm.toLocaleString()} km`}
+                          </span>
                           <span className="text-primary">
                             {c.real && c.live ? "●" : formatAge(remaining)}
                           </span>
@@ -968,7 +1064,7 @@ export function Hud() {
                   </p>
                   <p className="truncate font-mono text-[10px] text-muted">
                     {c.protocol}
-                    {c.process ? ` · ${c.process}` : ""}
+                    {c.isPrivate ? " · LAN" : ""}
                   </p>
                 </button>
               </li>
@@ -999,6 +1095,7 @@ function FocusCard({
       </div>
       <p className="mt-0.5 text-sm font-semibold text-fg">
         {selected.city}, {selected.country}
+        {selected.isPrivate ? " · LAN" : ""}
       </p>
       <p className="font-mono text-[11px] text-accent">
         {selected.protocol} · {selected.direction}
@@ -1012,14 +1109,11 @@ function FocusCard({
       <p className="font-mono text-[10px] text-muted">
         {selected.ip}:{selected.port}
       </p>
-      {selected.httpPath && (
-        <p className="truncate font-mono text-[10px] text-primary">
-          {selected.httpMethod} {selected.httpPath}
-        </p>
-      )}
       <p className="mt-0.5 text-[10px] text-faint">
-        {selected.distanceKm.toLocaleString()} km ·{" "}
-        {formatRate(selected.bytesPerSec || 0)} ·{" "}
+        {selected.isPrivate
+          ? "Internal / private"
+          : `${selected.distanceKm.toLocaleString()} km`}{" "}
+        · {formatRate(selected.bytesPerSec || 0)} ·{" "}
         {formatBytes(selected.bytes || 0)}
       </p>
       <button

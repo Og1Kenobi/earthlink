@@ -11,6 +11,7 @@ type TrafficSnapshot = {
   mode: string;
   error: string | null;
   hostId?: string;
+  includePrivate?: boolean;
   home: {
     lat: number;
     lon: number;
@@ -46,6 +47,7 @@ type TrafficSnapshot = {
     bytesPerSec?: number;
     hostId?: string;
     transport?: string;
+    isPrivate?: boolean;
   }>;
   activeCount: number;
   inboundCount?: number;
@@ -84,6 +86,7 @@ function mapRow(c: TrafficSnapshot["connections"][number]) {
     bytesPerSec: c.bytesPerSec,
     hostId: c.hostId,
     transport: c.transport,
+    isPrivate: c.isPrivate,
   };
 }
 
@@ -102,6 +105,7 @@ export function TrafficFeed() {
   const setHome = useConnectionStore((s) => s.setHome);
   const setTopTalkers = useConnectionStore((s) => s.setTopTalkers);
   const setHostId = useConnectionStore((s) => s.setHostId);
+  const setIncludePrivate = useConnectionStore((s) => s.setIncludePrivate);
   const pushHistoryEvents = useConnectionStore((s) => s.pushHistoryEvents);
   const demoTimer = useRef<number | null>(null);
 
@@ -127,6 +131,9 @@ export function TrafficFeed() {
         });
       }
       if (snap.hostId) setHostId(snap.hostId);
+      if (typeof snap.includePrivate === "boolean") {
+        setIncludePrivate(snap.includePrivate);
+      }
       setAgentActiveCount(snap.activeCount ?? 0);
       setDirectionCounts(snap.inboundCount ?? 0, snap.outboundCount ?? 0);
       setAgentError(snap.error);
@@ -196,10 +203,10 @@ export function TrafficFeed() {
     setHome,
     setTopTalkers,
     setHostId,
+    setIncludePrivate,
     pushHistoryEvents,
   ]);
 
-  // Demo spawner when agent offline
   useEffect(() => {
     if (mode === "real" || mode === "connecting") {
       if (demoTimer.current) {

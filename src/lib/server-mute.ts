@@ -27,3 +27,33 @@ export async function pullServerMutes(): Promise<string[]> {
     return [];
   }
 }
+
+export async function setServerIncludePrivate(
+  includePrivate: boolean,
+): Promise<boolean | null> {
+  try {
+    const r = await fetch("/api/traffic/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ includePrivate }),
+    });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { includePrivate?: boolean };
+    return Boolean(j.includePrivate);
+  } catch {
+    return null;
+  }
+}
+
+export async function pullServerSettings(): Promise<{
+  includePrivate: boolean;
+} | null> {
+  try {
+    const r = await fetch("/api/traffic/settings", { cache: "no-store" });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { includePrivate?: boolean };
+    return { includePrivate: Boolean(j.includePrivate) };
+  } catch {
+    return null;
+  }
+}
