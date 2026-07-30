@@ -174,15 +174,15 @@ function ConnectionArc({
       });
     };
 
-    // Smooth opacity curve for arcs (never hard cut until life≈0)
     applyOpacity(lineRef.current, (0.25 + life * 0.7) * selBoost);
     applyOpacity(glowRef.current, (0.08 + life * 0.22) * selBoost);
 
     if (remoteRef.current) {
       const m = remoteRef.current.material as THREE.MeshBasicMaterial;
       m.opacity = 0.55 + life * 0.45;
+      // Gentle pin pulse — wall-clock only (NOT tied to globe spin)
       const s =
-        1 + Math.sin(state.clock.elapsedTime * 6 + conn.createdAt * 0.001) * 0.1;
+        1 + Math.sin((now / 1000) * 5.5 + conn.createdAt * 0.001) * 0.1;
       remoteRef.current.scale.setScalar(s * Math.max(life, 0.05) * selBoost);
     }
     if (haloRef.current) {
@@ -194,7 +194,9 @@ function ConnectionArc({
       heatRef.current.scale.setScalar((1.2 + (1 - life) * 1.6) * selBoost);
     }
     if (pulseRef.current) {
-      let t = (state.clock.elapsedTime * 0.85 + conn.createdAt * 0.001) % 1;
+      // Fixed ~2.8s trip along the arc, independent of spin preset / frame delta
+      const periodMs = 2800;
+      let t = (now / periodMs + (conn.createdAt % 1000) / 1000) % 1;
       if (direction === "outbound") t = 1 - t;
       const idx = Math.min(
         points.length - 1,
@@ -312,6 +314,7 @@ function HomeBeacon({ lat, lon }: { lat: number; lon: number }) {
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
     if (core.current) {
+      // Home beacon pulse — fixed rate, not spin
       core.current.scale.setScalar(1 + Math.sin(t * 3) * 0.12);
     }
     if (ring.current) {

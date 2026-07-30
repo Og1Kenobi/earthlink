@@ -120,15 +120,19 @@ export function Earth({
   }, []);
 
   useFrame((_, delta) => {
+    // Spin multiplies ONLY this rotation. Arc pulse/fade clocks use
+    // performance.now() and are independent of spinPreset.
     if (!autoRotate || !group.current) return;
     const rate = rateRef.current;
     if (rate <= 0) return;
-    const dt = Math.min(Math.max(delta, 0), 0.1);
+    const dt = Math.min(Math.max(delta, 0), 0.05);
     group.current.rotation.y += dt * SPIN_BASE * rate;
   });
 
   return (
     <group ref={group}>
+      {/* Globe mesh + arcs share orientation so pins stick to countries.
+          Internal arc animations do not read spinPreset / SPIN_RATES. */}
       <PoliticalGlobe>{children}</PoliticalGlobe>
     </group>
   );

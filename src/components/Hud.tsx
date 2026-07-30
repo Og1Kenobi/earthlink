@@ -474,14 +474,14 @@ export function Hud() {
               ))}
             </div>
 
-            <div className="ml-1 flex items-center gap-0.5 border-l border-border pl-2" role="group" aria-label="Globe spin speed">
+            <div className="ml-1 flex items-center gap-0.5 border-l border-border pl-2" role="group" aria-label="Globe rotation speed">
               {SPIN_PRESETS.map((p) => {
                 const active = spinPreset === p.id;
                 return (
                   <button
                     key={p.id}
                     type="button"
-                    data-tip={`Globe spin: ${p.label}`}
+                    data-tip={`Globe rotation only: ${p.label} (arcs stay the same speed)`}
                     aria-pressed={active}
                     className={`tip tip-below rounded-md border px-1.5 py-0.5 font-mono text-[9px] uppercase transition ${
                       active
