@@ -33,7 +33,6 @@ export function Earth({
     }
   }, [dayMap, nightMap, bumpMap]);
 
-  // Unlit base so continents always read, plus a lit pass for soft shading
   const baseMat = useMemo(
     () =>
       new THREE.MeshBasicMaterial({
@@ -82,31 +81,6 @@ export function Earth({
       <mesh material={shadeMat} scale={1.001}>
         <sphereGeometry args={[EARTH_RADIUS, 80, 80]} />
       </mesh>
-
-      <mesh scale={1.025}>
-        <sphereGeometry args={[EARTH_RADIUS, 48, 48]} />
-        <meshBasicMaterial
-          color="#9ad8ff"
-          transparent
-          opacity={0.06}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-          toneMapped={false}
-        />
-      </mesh>
-      <mesh scale={1.12}>
-        <sphereGeometry args={[EARTH_RADIUS, 32, 32]} />
-        <meshBasicMaterial
-          color="#3a9fd4"
-          transparent
-          opacity={0.13}
-          side={THREE.BackSide}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-          toneMapped={false}
-        />
-      </mesh>
-
       {children}
     </group>
   );
