@@ -15,22 +15,28 @@ import {
 import { latLonToVector3 } from "@/lib/geo";
 import { EARTH_RADIUS } from "./Earth";
 
-const ARC_ALTITUDE = 0.12;
-const DOT_SIZE = 0.018;
+const ARC_ALTITUDE = 0.18;
+const DOT_SIZE = 0.02;
 
 function arcPoints(
   fromLat: number,
   fromLon: number,
   toLat: number,
   toLon: number,
-  segments = 48,
+  segments = 64,
 ): THREE.Vector3[] {
   const a = latLonToVector3(fromLat, fromLon, EARTH_RADIUS);
   const b = latLonToVector3(toLat, toLon, EARTH_RADIUS);
+  // Spherical slerp so arcs sit above the surface cleanly
   const pts: THREE.Vector3[] = [];
+  const angle = Math.max(a.angleTo(b), 1e-6);
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
-    const p = new THREE.Vector3().lerpVectors(a, b, t).normalize();
+    const sin = Math.sin(angle);
+    const p = new THREE.Vector3()
+      .addScaledVector(a, Math.sin((1 - t) * angle) / sin)
+      .addScaledVector(b, Math.sin(t * angle) / sin)
+      .normalize();
     const lift = Math.sin(Math.PI * t) * ARC_ALTITUDE;
     p.multiplyScalar(EARTH_RADIUS + lift);
     pts.push(p);
@@ -62,15 +68,15 @@ function ConnectionArc({
   homeLat,
   homeLon,
   selected,
-  now,
 }: {
   conn: Connection;
   homeLat: number;
   homeLon: number;
   selected: boolean;
-  now: number;
 }) {
-  const life = connectionLife(conn, now);
+  const group = useRef<THREE.Group>(null);
+  const matRef = useRef<THREE.Material | null>(null);
+  const dotRef = useRef<THREE.MeshBasicMaterial>(null);
   const inbound = conn.direction === "inbound";
   const color = inbound ? "#2ee6a6" : "#f59e0b";
   const weight = protocolWeight(conn.protocol, conn.bytesPerSec ?? 0);
@@ -82,29 +88,77 @@ function ConnectionArc({
     [conn.lat, conn.lon, homeLat, homeLon, inbound],
   );
   const remote = useMemo(
-    () => latLonToVector3(conn.lat, conn.lon, EARTH_RADIUS + 0.015),
+    () => latLonToVector3(conn.lat, conn.lon, EARTH_RADIUS + 0.02),
     [conn.lat, conn.lon],
   );
 
-  if (life <= 0.02) return null;
+  useFrame(() => {
+    const life = connectionLife(conn, performance.now());
+    if (group.current) group.current.visible = life > 0.02;
+    const lineOpacity = 0.45 + life * 0.5;
+    const dotOpacity = 0.55 + life * 0.45;
+    // drei Line material may be on children
+    group.current?.traverse((obj) => {
+      const m = (obj as THREE.Mesh).material;
+      if (!m) return;
+      const mats = Array.isArray(m) ? m : [m];
+      for (const mat of mats) {
+        if ("opacity" in mat) {
+          mat.transparent = true;
+          mat.opacity = obj.type === "Line2" || obj.type === "Line" || obj.type === "Mesh"
+            ? (obj as THREE.Mesh).geometry?.type?.includes("Sphere")
+              ? dotOpacity
+              : lineOpacity
+            : lineOpacity;
+          mat.depthWrite = false;
+        }
+      }
+    });
+    if (dotRef.current) {
+      dotRef.current.opacity = dotOpacity;
+    }
+  });
+
+  const lineWidth = Math.max(1.5, (selected ? 2.8 : 1.8) * weight);
 
   return (
-    <group>
+    <group ref={group}>
       <Line
         points={pts}
         color={color}
-        lineWidth={(selected ? 2.2 : 1.1) * weight}
+        lineWidth={lineWidth}
         transparent
-        opacity={0.35 + life * 0.55}
+        opacity={0.85}
         depthWrite={false}
+        depthTest
         toneMapped={false}
+        frustumCulled={false}
+      />
+      {/* secondary soft arc for visibility */}
+      <Line
+        points={pts}
+        color={color}
+        lineWidth={lineWidth * 2.2}
+        transparent
+        opacity={0.2}
+        depthWrite={false}
+        depthTest
+        toneMapped={false}
+        frustumCulled={false}
       />
       <mesh position={remote}>
-        <sphereGeometry args={[DOT_SIZE * (selected ? 1.6 : 1) * Math.min(weight, 1.5), 10, 10]} />
+        <sphereGeometry
+          args={[
+            DOT_SIZE * (selected ? 1.6 : 1) * Math.min(weight, 1.5),
+            12,
+            12,
+          ]}
+        />
         <meshBasicMaterial
+          ref={dotRef}
           color={color}
           transparent
-          opacity={0.5 + life * 0.5}
+          opacity={0.9}
           toneMapped={false}
           depthWrite={false}
         />
@@ -113,11 +167,15 @@ function ConnectionArc({
   );
 }
 
-function useVisibleConnections(list: Connection[], max = 32) {
+function useVisibleConnections(list: Connection[], max = 64) {
   return useMemo(() => {
+    // Prefer live, then most recently created
     const live = list.filter((c) => c.live !== false);
     const dead = list.filter((c) => c.live === false);
-    return [...live, ...dead].slice(0, max);
+    const sortedLive = [...live].sort(
+      (a, b) => (b.bytesPerSec || 0) - (a.bytesPerSec || 0),
+    );
+    return [...sortedLive, ...dead].slice(0, max);
   }, [list, max]);
 }
 
@@ -190,15 +248,11 @@ export function ConnectionsLayer() {
   const selectedId = useConnectionStore((s) => s.selectedId);
   const trails = useConnectionStore((s) => s.trails);
   const display = useDisplayConnections();
-  const visible = useVisibleConnections(display, 40);
-  const nowRef = useRef(performance.now());
+  const visible = useVisibleConnections(display, 72);
 
   useFrame(() => {
-    nowRef.current = performance.now();
-    useConnectionStore.getState().tick(nowRef.current);
+    useConnectionStore.getState().tick(performance.now());
   });
-
-  const now = nowRef.current;
 
   return (
     <group>
@@ -210,10 +264,8 @@ export function ConnectionsLayer() {
           homeLat={home.lat}
           homeLon={home.lon}
           selected={c.id === selectedId}
-          now={now}
         />
       ))}
-      {/* heat trails stay global for now */}
       {trails.slice(0, 40).map((t) => {
         const p = latLonToVector3(t.lat, t.lon, EARTH_RADIUS + 0.01);
         const age = (performance.now() - t.born) / t.ttl;
@@ -235,5 +287,4 @@ export function ConnectionsLayer() {
   );
 }
 
-// silence unused type import if tree-shaken
 export type { TrafficDirection };

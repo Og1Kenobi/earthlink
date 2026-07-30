@@ -744,6 +744,10 @@ export const useConnectionStore = create<State>((set, get) => ({
         const prev = byId.get(row.id);
         const muted = isIpMuted(row.ip, mutedPeers);
         if (prev) {
+          const wasLive = prev.live !== false;
+          const nowLive = row.live !== false;
+          // When a real socket closes, restart the fade clock so arcs linger properly
+          const dying = wasLive && !nowLive;
           byId.set(row.id, {
             ...prev,
             protocol: row.protocol,
@@ -773,10 +777,12 @@ export const useConnectionStore = create<State>((set, get) => ({
             ...(!(row.hostId ?? prev.hostId) && row.id?.includes("|")
               ? { hostId: row.id.split("|")[0] }
               : {}),
-
-            ttl: row.live
-              ? Math.max(prev.ttl, now - prev.createdAt + 60_000)
-              : now - prev.createdAt + (row.lingerMs ?? linger),
+            createdAt: dying ? now : prev.createdAt,
+            ttl: nowLive
+              ? Math.max(prev.ttl, now - (dying ? now : prev.createdAt) + 120_000)
+              : dying
+                ? (row.lingerMs ?? linger)
+                : Math.max(prev.ttl, row.lingerMs ?? linger),
           });
         } else {
           const isNew = !seenRealIds.has(row.id);
@@ -954,14 +960,23 @@ export const useConnectionStore = create<State>((set, get) => ({
 }));
 
 export function connectionLife(c: Connection, now: number): number {
-  const age = now - c.createdAt;
-  const t = age / c.ttl;
-  if (c.real && c.live) {
-    if (t < 0.05) return t / 0.05;
+  const age = Math.max(0, now - c.createdAt);
+
+  // Live real sockets stay fully visible (brief fade-in only)
+  if (c.real && c.live !== false) {
+    const fadeIn = 350;
+    if (age < fadeIn) return age / fadeIn;
     return 1;
   }
-  if (t < 0.08) return t / 0.08;
-  if (t > 0.72) return Math.max(0, 1 - (t - 0.72) / 0.28);
+
+  // Dying / demo: fade based on remaining time, not absolute age
+  // (age/ttl is wrong for long-lived real sockets that then close)
+  const remaining = c.ttl - age;
+  if (remaining <= 0) return 0;
+  const fadeOut = Math.min(2200, Math.max(400, c.ttl * 0.4));
+  if (remaining < fadeOut) return remaining / fadeOut;
+  // short fade-in for demo
+  if (!c.real && age < 200) return age / 200;
   return 1;
 }
 
