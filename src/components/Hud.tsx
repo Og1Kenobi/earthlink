@@ -89,7 +89,7 @@ function matchesFilter(c: Connection, filter: ConnFilter): boolean {
 function ActivitySpark({ samples }: { samples: number[] }) {
   const max = Math.max(1, ...samples);
   return (
-    <div className="flex h-8 items-end gap-px" aria-hidden>
+    <div className="flex h-7 items-end gap-px" aria-hidden>
       {samples.map((v, i) => {
         const h = Math.max(8, Math.round((v / max) * 100));
         return (
@@ -223,7 +223,7 @@ export function Hud() {
       if (c.live === false) continue;
       map.set(c.country, (map.get(c.country) ?? 0) + 1);
     }
-    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
   }, [unmuted]);
 
   const historyMin = useMemo(() => {
@@ -322,13 +322,12 @@ export function Hud() {
   }
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-3 sm:p-5">
+    <div className="pointer-events-none absolute inset-0 z-20 flex h-full min-h-0 flex-col justify-between overflow-hidden p-3 sm:p-4">
       <div className="vignette absolute inset-0" />
       <div className="scanlines absolute inset-0" />
 
-      {/* TOP — full brand + tools (same richness as before) */}
-      <header className="pointer-events-auto relative flex flex-wrap items-start justify-between gap-3">
-        <div className="panel-glass panel-glow-in max-w-lg rounded-xl px-4 py-3 sm:px-5">
+      <header className="pointer-events-auto relative z-10 flex shrink-0 flex-wrap items-start justify-between gap-2">
+        <div className="panel-glass panel-glow-in max-w-lg rounded-xl px-3 py-2.5 sm:px-4">
           <div className="flex flex-wrap items-center gap-2">
             <Globe2 className="size-5 text-primary" strokeWidth={1.75} />
             <h1 className="text-base font-semibold tracking-tight text-fg sm:text-lg">
@@ -347,11 +346,11 @@ export function Hud() {
               {isReplay ? "REPLAY" : modeLabel}
             </span>
           </div>
-          <p className="mt-1 max-w-md text-xs leading-relaxed text-muted sm:text-sm">
+          <p className="mt-0.5 max-w-md text-[11px] leading-relaxed text-muted sm:text-xs">
             Process · ASN · fat arcs · heat trails · mute · presets · replay ·
             alerts
           </p>
-          <div className="mt-2 flex flex-wrap items-center gap-3">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <ActivitySpark samples={activityHistory} />
             <div className="flex flex-wrap gap-1">
               {PRESETS.map((p) => (
@@ -359,7 +358,7 @@ export function Hud() {
                   key={p.id}
                   type="button"
                   onClick={() => setSecurityPreset(p.id)}
-                  className={`rounded-md border px-2 py-1 font-mono text-[10px] uppercase transition ${
+                  className={`rounded-md border px-2 py-0.5 font-mono text-[10px] uppercase transition ${
                     securityPreset === p.id
                       ? "border-primary/50 bg-primary/15 text-primary"
                       : "border-border bg-surface text-muted hover:border-border-strong"
@@ -372,7 +371,7 @@ export function Hud() {
           </div>
         </div>
 
-        <div className="panel-glass flex flex-wrap items-center gap-2 rounded-xl px-3 py-2">
+        <div className="panel-glass flex flex-wrap items-center gap-1.5 rounded-xl px-2.5 py-1.5">
           <ToolBtn title="Kiosk" onClick={() => setKiosk(true)}>
             <Expand className="size-4" />
           </ToolBtn>
@@ -461,67 +460,61 @@ export function Hud() {
         </div>
       </header>
 
-      {/*
-        MIDDLE: three-column ring around the globe
-        Left stack = ALL panels visible (not tabbed)
-        Center = empty for globe + optional focus
-        Right = full connections
-      */}
-      <div className="pointer-events-none relative flex min-h-0 flex-1 items-stretch justify-between gap-3 py-3">
-        {/* LEFT COLUMN — traffic + talkers + alerts + home + mute, all open */}
-        <aside className="pointer-events-auto flex w-[min(100%,16.5rem)] shrink-0 flex-col gap-2.5 self-stretch overflow-y-auto">
-          {/* Traffic */}
-          <div className="panel-glass rounded-xl p-3 sm:p-4">
-            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-faint">
+      {/* Middle band: height-capped so left never blows past the viewport */}
+      <div className="pointer-events-none relative flex min-h-0 flex-1 items-stretch justify-between gap-3 overflow-hidden py-2">
+        {/* LEFT — compact, height-limited, only internal scroll if needed */}
+        <aside className="pointer-events-auto flex w-[min(100%,15.75rem)] shrink-0 flex-col gap-2 self-stretch overflow-y-auto overscroll-contain [scrollbar-width:thin]">
+          <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
+            <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-faint">
               <Activity className="size-3.5 text-accent" />
               Traffic
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-3">
+            <div className="mt-2 grid grid-cols-2 gap-2">
               <div>
-                <p className="text-[10px] uppercase text-faint">Active</p>
-                <p className="font-mono text-2xl font-semibold text-primary text-glow">
+                <p className="text-[9px] uppercase text-faint">Active</p>
+                <p className="font-mono text-xl font-semibold text-primary text-glow">
                   {active}
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase text-faint">Seen</p>
-                <p className="font-mono text-2xl font-semibold text-fg">
+                <p className="text-[9px] uppercase text-faint">Seen</p>
+                <p className="font-mono text-xl font-semibold text-fg">
                   {totalSeen}
                 </p>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-primary/25 bg-primary/10 px-2 py-1.5">
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              <div className="rounded-lg border border-primary/25 bg-primary/10 px-2 py-1">
                 <p className="flex items-center gap-1 text-[9px] uppercase text-primary">
                   <ArrowDownLeft className="size-3" /> In
                 </p>
-                <p className="font-mono text-lg font-semibold text-primary">
+                <p className="font-mono text-base font-semibold text-primary">
                   {inboundCount}
                 </p>
               </div>
-              <div className="rounded-lg border border-warn/25 bg-warn/10 px-2 py-1.5">
+              <div className="rounded-lg border border-warn/25 bg-warn/10 px-2 py-1">
                 <p className="flex items-center gap-1 text-[9px] uppercase text-warn">
                   <ArrowUpRight className="size-3" /> Out
                 </p>
-                <p className="font-mono text-lg font-semibold text-warn">
+                <p className="font-mono text-base font-semibold text-warn">
                   {outboundCount}
                 </p>
               </div>
             </div>
             {(enabledMutes > 0 || mutedActiveCount > 0) && (
-              <p className="mt-2 font-mono text-[10px] text-faint">
+              <p className="mt-1.5 font-mono text-[10px] text-faint">
                 {enabledMutes} muted
-                {mutedActiveCount ? ` · ${mutedActiveCount} hidden live` : ""}
+                {mutedActiveCount ? ` · ${mutedActiveCount} hidden` : ""}
               </p>
             )}
             {topCountries.length > 0 && (
-              <div className="mt-3 border-t border-border pt-3">
-                <p className="text-[10px] uppercase text-faint">Hot countries</p>
-                <ul className="mt-1.5 space-y-1">
+              <div className="mt-2 border-t border-border pt-2">
+                <p className="text-[9px] uppercase text-faint">Hot countries</p>
+                <ul className="mt-1 space-y-0.5">
                   {topCountries.map(([cc, n]) => (
                     <li
                       key={cc}
-                      className="flex justify-between font-mono text-xs text-muted"
+                      className="flex justify-between font-mono text-[11px] text-muted"
                     >
                       <span className="text-fg">{cc}</span>
                       <span className="text-primary">{n}</span>
@@ -531,43 +524,39 @@ export function Hud() {
               </div>
             )}
             {mode !== "real" && (
-              <div className="mt-3">
-                <p className="text-[10px] uppercase text-faint">Demo intensity</p>
-                <div className="mt-1.5 flex gap-1">
-                  {(["calm", "normal", "busy"] as const).map((level) => (
-                    <button
-                      key={level}
-                      type="button"
-                      onClick={() => setIntensity(level)}
-                      className={`flex-1 rounded-md border px-2 py-1.5 font-mono text-[10px] uppercase ${
-                        intensity === level
-                          ? "border-primary/50 bg-primary/15 text-primary"
-                          : "border-border bg-surface text-muted"
-                      }`}
-                    >
-                      {level}
-                    </button>
-                  ))}
-                </div>
+              <div className="mt-2 flex gap-1">
+                {(["calm", "normal", "busy"] as const).map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    onClick={() => setIntensity(level)}
+                    className={`flex-1 rounded-md border px-1 py-1 font-mono text-[9px] uppercase ${
+                      intensity === level
+                        ? "border-primary/50 bg-primary/15 text-primary"
+                        : "border-border bg-surface text-muted"
+                    }`}
+                  >
+                    {level}
+                  </button>
+                ))}
               </div>
             )}
             {agentError && mode !== "real" && (
-              <p className="mt-2 font-mono text-[10px] text-danger">
+              <p className="mt-1.5 font-mono text-[10px] text-danger">
                 Agent: {agentError}
               </p>
             )}
           </div>
 
-          {/* Top talkers — always visible */}
-          <div className="panel-glass rounded-xl p-3 sm:p-4">
+          <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
             <p className="text-[10px] font-medium uppercase tracking-wider text-faint">
               Top talkers
             </p>
-            <ul className="mt-2 space-y-1.5">
+            <ul className="mt-1.5 space-y-1">
               {topTalkers.length === 0 ? (
-                <li className="text-xs text-muted">Waiting for rates…</li>
+                <li className="text-[11px] text-muted">Waiting for rates…</li>
               ) : (
-                topTalkers.slice(0, 6).map((t) => (
+                topTalkers.slice(0, 4).map((t) => (
                   <li key={t.ip} className="font-mono text-[10px]">
                     <div className="flex justify-between gap-1 text-fg">
                       <span className="truncate">
@@ -587,10 +576,9 @@ export function Hud() {
             </ul>
           </div>
 
-          {/* Alerts — always visible */}
-          <div className="panel-glass rounded-xl p-3 sm:p-4">
+          <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-medium uppercase text-faint">
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-faint">
                 <Shield className="size-3.5 text-danger" />
                 Alerts
                 {alerts.length > 0 && (
@@ -609,14 +597,14 @@ export function Hud() {
                 </button>
               )}
             </div>
-            <ul className="mt-2 max-h-28 space-y-1.5 overflow-y-auto">
+            <ul className="mt-1.5 max-h-[4.5rem] space-y-1 overflow-y-auto">
               {alerts.length === 0 ? (
-                <li className="text-xs text-muted">No alerts yet</li>
+                <li className="text-[11px] text-muted">No alerts yet</li>
               ) : (
-                alerts.slice(0, 8).map((a) => (
+                alerts.slice(0, 4).map((a) => (
                   <li
                     key={a.id}
-                    className={`rounded-md border px-2 py-1 font-mono text-[10px] ${
+                    className={`rounded-md border px-1.5 py-0.5 font-mono text-[10px] ${
                       a.level === "danger"
                         ? "border-danger/30 bg-danger/10 text-danger"
                         : a.level === "warn"
@@ -631,10 +619,9 @@ export function Hud() {
             </ul>
           </div>
 
-          {/* Home */}
-          <div className="panel-glass rounded-xl p-3 sm:p-4">
+          <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs font-medium uppercase text-faint">
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-faint">
                 <MapPin className="size-3.5 text-accent" />
                 Home
               </div>
@@ -642,37 +629,29 @@ export function Hud() {
                 type="button"
                 onClick={onRelocate}
                 disabled={locating || mode === "real"}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface-elevated px-2 text-[11px] text-muted disabled:opacity-50"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-surface-elevated px-1.5 text-[10px] text-muted disabled:opacity-50"
               >
                 <Crosshair
-                  className={`size-3.5 ${locating ? "animate-spin" : ""}`}
+                  className={`size-3 ${locating ? "animate-spin" : ""}`}
                 />
                 {locating ? "…" : "Locate"}
               </button>
             </div>
-            <p className="mt-2 text-sm font-medium text-fg">
+            <p className="mt-1 truncate text-sm font-medium text-fg">
               {homeReady || home.source !== "default"
                 ? home.label
                 : "Locating…"}
             </p>
-            <p className="mt-0.5 font-mono text-[11px] text-muted">
-              {home.lat.toFixed(4)}°, {home.lon.toFixed(4)}°
+            <p className="font-mono text-[10px] text-muted">
+              {home.lat.toFixed(2)}°, {home.lon.toFixed(2)}°
+              {home.ip ? ` · ${home.ip}` : ""}
             </p>
-            {home.ip && (
-              <p className="mt-0.5 font-mono text-[11px] text-faint">
-                IP {home.ip}
-              </p>
-            )}
-            {home.org && (
-              <p className="mt-0.5 font-mono text-[10px] text-faint">{home.org}</p>
-            )}
           </div>
 
-          {/* Muted — open by default when any mutes exist */}
           {(showMuted || mutedPeers.length > 0) && (
-            <div className="panel-glass rounded-xl p-3 sm:p-4">
+            <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-medium uppercase text-faint">
+                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-faint">
                   <Ban className="size-3.5 text-warn" />
                   Muted IPs
                 </div>
@@ -681,7 +660,7 @@ export function Hud() {
                 </button>
               </div>
               <form
-                className="mt-2 flex gap-1.5"
+                className="mt-1.5 flex gap-1"
                 onSubmit={(e) => {
                   e.preventDefault();
                   const raw = muteInput.trim();
@@ -695,23 +674,23 @@ export function Hud() {
                   value={muteInput}
                   onChange={(e) => setMuteInput(e.target.value)}
                   placeholder="8.8.8.8"
-                  className="h-8 min-w-0 flex-1 rounded-md border border-border bg-surface-elevated px-2 font-mono text-[11px] text-fg outline-none"
+                  className="h-7 min-w-0 flex-1 rounded-md border border-border bg-surface-elevated px-2 font-mono text-[10px] text-fg outline-none"
                 />
                 <button
                   type="submit"
-                  className="inline-flex h-8 items-center rounded-md border border-warn/30 bg-warn/10 px-2 text-warn"
+                  className="inline-flex h-7 items-center rounded-md border border-warn/30 bg-warn/10 px-1.5 text-warn"
                 >
                   <Plus className="size-3.5" />
                 </button>
               </form>
-              <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto">
+              <ul className="mt-1.5 max-h-16 space-y-1 overflow-y-auto">
                 {mutedPeers.length === 0 ? (
-                  <li className="text-xs text-muted">None muted</li>
+                  <li className="text-[11px] text-muted">None muted</li>
                 ) : (
                   mutedPeers.map((p) => (
                     <li
                       key={p.ip}
-                      className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5"
+                      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5"
                     >
                       <button
                         type="button"
@@ -719,13 +698,13 @@ export function Hud() {
                         className={p.enabled ? "text-warn" : "text-faint"}
                       >
                         {p.enabled ? (
-                          <EyeOff className="size-3.5" />
+                          <EyeOff className="size-3" />
                         ) : (
-                          <Eye className="size-3.5" />
+                          <Eye className="size-3" />
                         )}
                       </button>
                       <span
-                        className={`min-w-0 flex-1 truncate font-mono text-[11px] ${
+                        className={`min-w-0 flex-1 truncate font-mono text-[10px] ${
                           p.enabled ? "text-fg" : "text-faint line-through"
                         }`}
                       >
@@ -741,9 +720,8 @@ export function Hud() {
             </div>
           )}
 
-          {/* Focus under left stack on narrow; also bottom-center on wide */}
           {selected && (
-            <div className="panel-glass panel-glow-in rounded-xl p-3 sm:p-4 lg:hidden">
+            <div className="panel-glass panel-glow-in shrink-0 rounded-xl p-2.5 lg:hidden">
               <FocusCard
                 selected={selected}
                 onClose={() => setSelectedId(null)}
@@ -758,11 +736,10 @@ export function Hud() {
           )}
         </aside>
 
-        {/* CENTER — free for globe; focus floats here on large screens */}
         <div className="pointer-events-none relative hidden min-w-0 flex-1 lg:block">
           {selected && (
-            <div className="pointer-events-auto absolute bottom-0 left-1/2 w-[min(100%,20rem)] -translate-x-1/2">
-              <div className="panel-glass panel-glow-in rounded-xl p-3 sm:p-4">
+            <div className="pointer-events-auto absolute bottom-1 left-1/2 w-[min(100%,18rem)] -translate-x-1/2">
+              <div className="panel-glass panel-glow-in rounded-xl p-3">
                 <FocusCard
                   selected={selected}
                   onClose={() => setSelectedId(null)}
@@ -778,12 +755,11 @@ export function Hud() {
           )}
         </div>
 
-        {/* RIGHT — connections full height (fills right empty band) */}
-        <aside className="pointer-events-auto hidden w-[min(100%,18rem)] shrink-0 flex-col self-stretch md:flex">
-          <div className="panel-glass flex min-h-0 flex-1 flex-col rounded-xl">
-            <div className="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-3">
+        <aside className="pointer-events-auto hidden min-h-0 w-[min(100%,17.5rem)] shrink-0 flex-col self-stretch md:flex">
+          <div className="panel-glass flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl">
+            <div className="flex shrink-0 flex-col gap-1.5 border-b border-border px-3 py-2.5">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-medium uppercase text-faint">
+                <div className="flex items-center gap-2 text-[10px] font-medium uppercase text-faint">
                   <Radio className="size-3.5 text-primary" />
                   Connections
                 </div>
@@ -795,7 +771,7 @@ export function Hud() {
                 <select
                   value={connFilter}
                   onChange={(e) => setConnFilter(e.target.value)}
-                  className="h-9 w-full appearance-none rounded-lg border border-border bg-surface-elevated py-1.5 pl-3 pr-8 font-mono text-[11px] text-fg outline-none"
+                  className="h-8 w-full appearance-none rounded-lg border border-border bg-surface-elevated py-1 pl-2.5 pr-7 font-mono text-[11px] text-fg outline-none"
                 >
                   {STATIC_FILTERS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -803,10 +779,10 @@ export function Hud() {
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint" />
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-faint" />
               </label>
             </div>
-            <ul className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+            <ul className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5 [scrollbar-width:thin]">
               {filtered.length === 0 ? (
                 <li className="px-2 py-6 text-center text-xs text-muted">
                   No visible connections
@@ -825,13 +801,13 @@ export function Hud() {
                           resumeFxAudio();
                           setSelectedId(isSel ? null : c.id);
                         }}
-                        className={`w-full rounded-lg px-2.5 py-2 pr-9 text-left hover:bg-surface-elevated/80 ${
+                        className={`w-full rounded-lg px-2 py-1.5 pr-8 text-left hover:bg-surface-elevated/80 ${
                           isSel ? "conn-row-selected" : ""
                         }`}
                       >
-                        <p className="truncate text-sm font-medium text-fg">
+                        <p className="truncate text-[13px] font-medium text-fg">
                           <span
-                            className={`mr-1.5 inline-flex items-center rounded px-1 py-0.5 font-mono text-[9px] uppercase ${
+                            className={`mr-1 inline-flex items-center rounded px-1 py-0.5 font-mono text-[9px] uppercase ${
                               inbound
                                 ? "bg-primary/15 text-primary"
                                 : "bg-warn/15 text-warn"
@@ -844,7 +820,7 @@ export function Hud() {
                             {c.country}
                           </span>
                         </p>
-                        <p className="truncate font-mono text-[11px] text-faint">
+                        <p className="truncate font-mono text-[10px] text-faint">
                           {c.ip}:{c.port} · {c.protocol}
                           {c.process ? ` · ${c.process}` : ""}
                         </p>
@@ -856,7 +832,7 @@ export function Hud() {
                               : ""}
                           </p>
                         )}
-                        <div className="mt-1 flex justify-between text-[10px] text-muted">
+                        <div className="mt-0.5 flex justify-between text-[10px] text-muted">
                           <span>{c.distanceKm.toLocaleString()} km</span>
                           <span className="text-primary">
                             {c.real && c.live ? "●" : formatAge(remaining)}
@@ -869,7 +845,7 @@ export function Hud() {
                           e.stopPropagation();
                           onMute(c.ip, `${c.city} · ${c.protocol}`);
                         }}
-                        className="absolute right-1.5 top-2 rounded-md p-1.5 text-faint hover:bg-warn/10 hover:text-warn"
+                        className="absolute right-1 top-1.5 rounded-md p-1 text-faint hover:bg-warn/10 hover:text-warn"
                         title={`Mute ${c.ip}`}
                       >
                         <Ban className="size-3.5" />
@@ -883,13 +859,12 @@ export function Hud() {
         </aside>
       </div>
 
-      {/* BOTTOM — replay + feed */}
-      <div className="pointer-events-auto relative z-10 space-y-2">
+      <div className="pointer-events-auto relative z-10 shrink-0 space-y-1.5">
         {showReplay && (
-          <div className="panel-glass rounded-xl px-4 py-3">
-            <div className="flex flex-wrap items-center gap-3">
+          <div className="panel-glass rounded-xl px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <History className="size-4 text-accent" />
-              <span className="text-xs font-medium uppercase text-faint">
+              <span className="text-[10px] font-medium uppercase text-faint">
                 Replay
               </span>
               <input
@@ -903,7 +878,7 @@ export function Hud() {
               <button
                 type="button"
                 onClick={() => setReplayMs(null)}
-                className={`rounded-md border px-2 py-1 font-mono text-[10px] uppercase ${
+                className={`rounded-md border px-2 py-0.5 font-mono text-[10px] uppercase ${
                   replayMs == null
                     ? "border-primary/40 bg-primary/10 text-primary"
                     : "border-border text-muted"
@@ -918,12 +893,12 @@ export function Hud() {
           </div>
         )}
 
-        <div className="panel-glass ticker-track overflow-hidden rounded-xl px-3 py-2">
+        <div className="panel-glass ticker-track overflow-hidden rounded-xl px-3 py-1.5">
           <div className="flex items-center gap-3">
             <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.14em] text-accent">
               Feed
             </span>
-            <ul className="flex min-w-0 flex-1 gap-6 overflow-x-auto">
+            <ul className="flex min-w-0 flex-1 gap-5 overflow-x-auto">
               {events.length === 0 ? (
                 <li className="font-mono text-[11px] text-faint">
                   Waiting for peers…
@@ -957,7 +932,6 @@ export function Hud() {
           </div>
         </div>
 
-        {/* Mobile connections */}
         <div className="panel-glass rounded-xl md:hidden">
           <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
             <span className="flex items-center gap-1 text-[10px] uppercase text-faint">
@@ -1018,37 +992,32 @@ function FocusCard({
   return (
     <>
       <div className="flex items-start justify-between">
-        <p className="text-xs font-medium uppercase text-faint">Focus</p>
+        <p className="text-[10px] font-medium uppercase text-faint">Focus</p>
         <button type="button" onClick={onClose}>
           <X className="size-3.5 text-muted" />
         </button>
       </div>
-      <p className="mt-1 text-sm font-semibold text-fg">
+      <p className="mt-0.5 text-sm font-semibold text-fg">
         {selected.city}, {selected.country}
       </p>
-      <p className="mt-0.5 font-mono text-[11px] text-accent">
+      <p className="font-mono text-[11px] text-accent">
         {selected.protocol} · {selected.direction}
         {selected.process ? ` · ${selected.process}` : ""}
       </p>
       {selected.org && (
-        <p className="mt-0.5 font-mono text-[10px] text-muted">
+        <p className="truncate font-mono text-[10px] text-muted">
           {selected.as || selected.org}
         </p>
       )}
-      <p className="mt-1 font-mono text-[11px] text-muted">
+      <p className="font-mono text-[10px] text-muted">
         {selected.ip}:{selected.port}
       </p>
       {selected.httpPath && (
-        <p className="mt-1 truncate font-mono text-[10px] text-primary">
+        <p className="truncate font-mono text-[10px] text-primary">
           {selected.httpMethod} {selected.httpPath}
         </p>
       )}
-      {selected.iface && (
-        <p className="mt-0.5 font-mono text-[10px] text-faint">
-          iface {selected.iface}
-        </p>
-      )}
-      <p className="mt-1 text-[11px] text-faint">
+      <p className="mt-0.5 text-[10px] text-faint">
         {selected.distanceKm.toLocaleString()} km ·{" "}
         {formatRate(selected.bytesPerSec || 0)} ·{" "}
         {formatBytes(selected.bytes || 0)}
@@ -1056,9 +1025,9 @@ function FocusCard({
       <button
         type="button"
         onClick={onMute}
-        className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-warn/35 bg-warn/10 text-xs text-warn"
+        className="mt-1.5 inline-flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-warn/35 bg-warn/10 text-[11px] text-warn"
       >
-        <Ban className="size-3.5" />
+        <Ban className="size-3" />
         Mute this IP
       </button>
     </>
@@ -1086,7 +1055,7 @@ function ToolBtn({
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex h-10 items-center gap-1.5 rounded-lg border px-3 text-sm transition disabled:opacity-40 ${
+      className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-sm transition disabled:opacity-40 ${
         active
           ? warn
             ? "border-warn/40 bg-warn/10 text-warn"

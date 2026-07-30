@@ -9,7 +9,7 @@ function SceneContent() {
   return (
     <>
       <color attach="background" args={["#03060c"]} />
-      <fog attach="fog" args={["#03060c", 9, 22]} />
+      <fog attach="fog" args={["#03060c", 10, 24]} />
       <hemisphereLight args={["#c4e0ff", "#020617", 0.55]} />
       <ambientLight intensity={0.45} color="#dbeafe" />
       <directionalLight position={[5, 3, 4]} intensity={1.55} color="#fff7ed" />
@@ -40,8 +40,8 @@ function SceneContent() {
         enablePan={false}
         enableDamping
         dampingFactor={0.055}
-        minDistance={3.15}
-        maxDistance={12}
+        minDistance={3.6}
+        maxDistance={14}
         rotateSpeed={0.5}
         zoomSpeed={0.75}
       />
@@ -65,7 +65,8 @@ export function EarthScene() {
       <Canvas
         className="absolute inset-0 h-full w-full touch-none"
         dpr={[1, 1.75]}
-        camera={{ position: [0, 0.4, 5.5], fov: 40, near: 0.1, far: 200 }}
+        // Slightly further back so poles aren't clipped by header/feed chrome
+        camera={{ position: [0, 0.2, 7.1], fov: 38, near: 0.1, far: 200 }}
         gl={{
           antialias: true,
           alpha: false,
