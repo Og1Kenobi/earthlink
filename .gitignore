@@ -10,3 +10,4 @@ screenshots/
 earthlink-server.tgz
 .project_id
 .node_modules.lock
+.grok/
