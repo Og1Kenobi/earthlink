@@ -52,7 +52,7 @@ export async function handleTrafficApi(req, res, urlPath) {
   if (method === "OPTIONS" && path.startsWith("/api/traffic")) {
     res.statusCode = 204;
     res.setHeader("access-control-allow-origin", "*");
-    res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
+    res.setHeader("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
     res.setHeader("access-control-allow-headers", "content-type, authorization, x-earthlink-token");
     res.end();
     return true;
@@ -94,8 +94,49 @@ export async function handleTrafficApi(req, res, urlPath) {
 
   if (path === "/api/traffic/agents") {
     const c = getCollector();
-    sendJson(res, 200, { ok: true, agents: c.listAgents() });
-    return true;
+    if (method === "GET") {
+      sendJson(res, 200, { ok: true, agents: c.listAgents() });
+      return true;
+    }
+    if (method === "POST") {
+      try {
+        const body = await readBody(req);
+        // { action: "remove", hostId } | { action: "clear-stale" }
+        if (body.action === "clear-stale" || body.clearStale) {
+          sendJson(res, 200, c.clearStaleAgents());
+          return true;
+        }
+        if (body.action === "remove" || body.hostId) {
+          const result = c.removeAgent(body.hostId);
+          sendJson(res, result.ok ? 200 : 400, result);
+          return true;
+        }
+        sendJson(res, 400, {
+          ok: false,
+          error: 'body: { action: "remove", hostId } or { action: "clear-stale" }',
+        });
+        return true;
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: e?.message ?? "bad body" });
+        return true;
+      }
+    }
+    if (method === "DELETE") {
+      // DELETE /api/traffic/agents?hostId=desktop-win  or ?stale=1
+      const hostId = url.searchParams.get("hostId");
+      const stale = url.searchParams.get("stale");
+      if (stale === "1" || stale === "true") {
+        sendJson(res, 200, c.clearStaleAgents());
+        return true;
+      }
+      if (hostId) {
+        const result = c.removeAgent(hostId);
+        sendJson(res, result.ok ? 200 : 400, result);
+        return true;
+      }
+      sendJson(res, 400, { ok: false, error: "hostId or stale=1 required" });
+      return true;
+    }
   }
 
   if (path === "/api/traffic/ingest" && method === "POST") {

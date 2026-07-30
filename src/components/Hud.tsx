@@ -177,6 +177,7 @@ export function Hud() {
   const setIncludePrivate = useConnectionStore((s) => s.setIncludePrivate);
   const setSpinPreset = useConnectionStore((s) => s.setSpinPreset);
   const setSelectedAgentId = useConnectionStore((s) => s.setSelectedAgentId);
+  const setAgents = useConnectionStore((s) => s.setAgents);
   const clearAlerts = useConnectionStore((s) => s.clearAlerts);
 
   const [now, setNow] = useState(() => performance.now());
@@ -265,6 +266,47 @@ export function Hud() {
   const onToggleMuteEnabled = (ip: string, enabled: boolean) => {
     setMuteEnabled(ip, enabled);
     void syncMuteToServer(enabled ? "mute" : "unmute", ip);
+  };
+
+  const removeAgent = async (id: string) => {
+    try {
+      const r = await fetch("/api/traffic/agents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "remove", hostId: id }),
+      });
+      const j = (await r.json()) as {
+        agents?: { hostId: string; os?: string; osLabel?: string; local?: boolean; socketCount?: number; stale?: boolean }[];
+      };
+      if (j.agents) setAgents(j.agents);
+      if (selectedAgentId === id) setSelectedAgentId(null);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const clearStaleAgents = async () => {
+    try {
+      const r = await fetch("/api/traffic/agents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "clear-stale" }),
+      });
+      const j = (await r.json()) as {
+        agents?: { hostId: string; os?: string; osLabel?: string; local?: boolean; socketCount?: number; stale?: boolean }[];
+      };
+      if (j.agents) {
+        setAgents(j.agents);
+        if (
+          selectedAgentId &&
+          !j.agents.some((a) => a.hostId === selectedAgentId)
+        ) {
+          setSelectedAgentId(null);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
   };
 
   const onToggleLan = async () => {
@@ -648,36 +690,55 @@ export function Hud() {
               <div className="mt-2 border-t border-border pt-2">
                 <div className="flex items-center justify-between gap-1">
                   <p className="text-[9px] uppercase text-faint">Agents</p>
-                  {selectedAgentId && (
-                    <button
-                      type="button"
-                      className="font-mono text-[9px] text-accent hover:underline"
-                      onClick={() => setSelectedAgentId(null)}
-                      title="Show connections from all agents"
-                    >
-                      All
-                    </button>
-                  )}
+                  <span className="flex items-center gap-1.5">
+                    {agents.some((a) => a.stale && !a.local) && (
+                      <button
+                        type="button"
+                        className="font-mono text-[9px] text-danger hover:underline"
+                        title="Remove all stale agents and their connections"
+                        onClick={() => void clearStaleAgents()}
+                      >
+                        Clear stale
+                      </button>
+                    )}
+                    {selectedAgentId && (
+                      <button
+                        type="button"
+                        className="font-mono text-[9px] text-accent hover:underline"
+                        onClick={() => setSelectedAgentId(null)}
+                        title="Show connections from all agents"
+                      >
+                        All
+                      </button>
+                    )}
+                  </span>
                 </div>
                 <ul className="mt-1 space-y-0.5">
-                  {agents.slice(0, 6).map((a) => {
+                  {agents.slice(0, 8).map((a) => {
                     const active = selectedAgentId === a.hostId;
                     return (
-                      <li key={a.hostId}>
+                      <li
+                        key={a.hostId}
+                        className={`flex items-center gap-0.5 rounded-md ${
+                          active ? "bg-accent/15 ring-1 ring-accent/40" : ""
+                        }`}
+                      >
                         <button
                           type="button"
                           title={
-                            active
-                              ? "Showing only this agent — click to clear"
-                              : `Show only ${a.hostId} connections`
+                            a.stale
+                              ? `${a.hostId} is stale (agent offline)`
+                              : active
+                                ? "Showing only this agent — click to clear"
+                                : `Show only ${a.hostId} connections`
                           }
                           onClick={() =>
                             setSelectedAgentId(active ? null : a.hostId)
                           }
-                          className={`flex w-full items-center justify-between gap-1 rounded-md px-1 py-0.5 text-left font-mono text-[10px] transition ${
+                          className={`flex min-w-0 flex-1 items-center justify-between gap-1 px-1 py-0.5 text-left font-mono text-[10px] transition ${
                             active
-                              ? "bg-accent/15 text-accent ring-1 ring-accent/40"
-                              : "text-muted hover:bg-surface hover:text-fg"
+                              ? "text-accent"
+                              : "text-muted hover:text-fg"
                           }`}
                         >
                           <span className="min-w-0 truncate">
@@ -698,9 +759,30 @@ export function Hud() {
                                   : "text-primary"
                             }
                           >
-                            {a.local ? "hub" : a.stale ? "stale" : a.socketCount ?? 0}
+                            {a.local
+                              ? "hub"
+                              : a.stale
+                                ? "stale"
+                                : a.socketCount ?? 0}
                           </span>
                         </button>
+                        {!a.local && (
+                          <button
+                            type="button"
+                            title={
+                              a.stale
+                                ? `Remove stale agent ${a.hostId}`
+                                : `Remove agent ${a.hostId} and its arcs`
+                            }
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void removeAgent(a.hostId);
+                            }}
+                            className="shrink-0 rounded p-0.5 text-faint hover:bg-danger/15 hover:text-danger"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        )}
                       </li>
                     );
                   })}

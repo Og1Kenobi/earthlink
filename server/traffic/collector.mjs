@@ -532,6 +532,17 @@ export function createTrafficCollector(options = {}) {
 
   function listAgents() {
     const now = Date.now();
+    // Drop remotes that have been silent for a long time (gone, not just "stale")
+    const dropAfter = Number(process.env.EARTHLINK_AGENT_DROP_MS || 120000);
+    for (const [id, ag] of remoteAgents) {
+      if (now - ag.lastSeen > dropAfter) {
+        for (const [k, c] of active) {
+          if (c.hostId === id) active.delete(k);
+        }
+        remoteAgents.delete(id);
+      }
+    }
+
     const local = {
       hostId: HOST_ID,
       os: LOCAL_OS,
@@ -548,6 +559,53 @@ export function createTrafficCollector(options = {}) {
       local: false,
     }));
     return [local, ...remotes];
+  }
+
+  /** Remove one remote agent and all of its connections. Cannot remove hub. */
+  function removeAgent(hostId) {
+    const id = String(hostId || "").trim();
+    if (!id || id === HOST_ID) {
+      return { ok: false, error: "cannot remove hub / empty id", agents: listAgents() };
+    }
+    let removedConns = 0;
+    for (const [k, c] of active) {
+      if (c.hostId === id) {
+        active.delete(k);
+        removedConns += 1;
+      }
+    }
+    const had = remoteAgents.delete(id);
+    return {
+      ok: true,
+      hostId: id,
+      removed: had,
+      removedConnections: removedConns,
+      agents: listAgents(),
+    };
+  }
+
+  /** Remove all stale remote agents + their connections. */
+  function clearStaleAgents() {
+    const now = Date.now();
+    const staleIds = [...remoteAgents.entries()]
+      .filter(([, a]) => now - a.lastSeen > agentStaleMs)
+      .map(([id]) => id);
+    let removedConnections = 0;
+    for (const id of staleIds) {
+      for (const [k, c] of active) {
+        if (c.hostId === id) {
+          active.delete(k);
+          removedConnections += 1;
+        }
+      }
+      remoteAgents.delete(id);
+    }
+    return {
+      ok: true,
+      removedAgents: staleIds,
+      removedConnections,
+      agents: listAgents(),
+    };
   }
 
   function snapshot() {
@@ -696,6 +754,8 @@ export function createTrafficCollector(options = {}) {
     setIncludePrivate,
     ingestRemote,
     listAgents,
+    removeAgent,
+    clearStaleAgents,
     hostId: HOST_ID,
     os: LOCAL_OS,
   };
