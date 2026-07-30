@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  Activity,
   ArrowDownLeft,
   ArrowUpRight,
   Ban,
@@ -88,7 +89,7 @@ function matchesFilter(c: Connection, filter: ConnFilter): boolean {
 function ActivitySpark({ samples }: { samples: number[] }) {
   const max = Math.max(1, ...samples);
   return (
-    <div className="flex h-6 items-end gap-px" aria-hidden>
+    <div className="flex h-8 items-end gap-px" aria-hidden>
       {samples.map((v, i) => {
         const h = Math.max(8, Math.round((v / max) * 100));
         return (
@@ -107,9 +108,9 @@ function ActivitySpark({ samples }: { samples: number[] }) {
 
 const PRESETS: { id: SecurityPreset; label: string }[] = [
   { id: "all", label: "All" },
-  { id: "security", label: "Sec" },
+  { id: "security", label: "Security" },
   { id: "web", label: "Web" },
-  { id: "noise-off", label: "Quiet" },
+  { id: "noise-off", label: "Noise off" },
 ];
 
 export function Hud() {
@@ -163,11 +164,8 @@ export function Hud() {
   const [locating, setLocating] = useState(false);
   const [connFilter, setConnFilter] = useState<ConnFilter>("all");
   const [muteInput, setMuteInput] = useState("");
-  const [showMuted, setShowMuted] = useState(false);
+  const [showMuted, setShowMuted] = useState(true);
   const [showReplay, setShowReplay] = useState(false);
-  const [leftTab, setLeftTab] = useState<"stats" | "talkers" | "alerts">(
-    "stats",
-  );
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(performance.now()), 200);
@@ -200,10 +198,6 @@ export function Hud() {
       void Notification.requestPermission();
     }
   }, [alerts, alertsEnabled]);
-
-  useEffect(() => {
-    if (alerts[0]?.level === "danger") setLeftTab("alerts");
-  }, [alerts]);
 
   const unmuted = useMemo(
     () =>
@@ -270,11 +264,11 @@ export function Hud() {
 
   if (kiosk) {
     return (
-      <div className="pointer-events-none absolute inset-0 z-20">
+      <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-4">
         <div className="vignette absolute inset-0" />
-        <header className="pointer-events-auto absolute left-4 top-4 right-4 flex items-start justify-between gap-3">
+        <header className="pointer-events-auto flex items-start justify-between">
           <div className="panel-glass rounded-xl px-4 py-3">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
               <Globe2 className="size-5 text-primary" />
               <h1 className="text-lg font-semibold text-fg">Earthlink NOC</h1>
               <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
@@ -296,86 +290,93 @@ export function Hud() {
           <button
             type="button"
             onClick={() => setKiosk(false)}
-            className="panel-glass inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm text-muted hover:text-fg"
+            className="pointer-events-auto panel-glass inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm text-muted hover:text-fg"
           >
             <Minimize2 className="size-4" />
             Exit kiosk
           </button>
         </header>
-        <div className="pointer-events-auto absolute bottom-4 left-4 right-4">
-          <div className="panel-glass ticker-track rounded-xl px-4 py-3">
-            <ul className="flex gap-8 overflow-x-auto font-mono text-sm">
-              {events.slice(0, 12).map((ev) => (
-                <li key={`${ev.id}-${ev.at}`} className="shrink-0">
-                  <span
-                    className={
-                      ev.direction === "inbound" ? "text-primary" : "text-warn"
-                    }
-                  >
-                    {ev.direction === "inbound" ? "↓" : "↑"}
-                  </span>{" "}
-                  <span className="text-fg">{ev.protocol}</span>
-                  <span className="text-muted">
-                    {" "}
-                    · {ev.city}, {ev.country}
-                    {ev.process ? ` · ${ev.process}` : ""}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
+        <div className="pointer-events-auto panel-glass ticker-track rounded-xl px-4 py-3">
+          <ul className="flex gap-8 overflow-x-auto font-mono text-sm">
+            {events.slice(0, 10).map((ev) => (
+              <li key={`${ev.id}-${ev.at}`} className="shrink-0">
+                <span
+                  className={
+                    ev.direction === "inbound" ? "text-primary" : "text-warn"
+                  }
+                >
+                  {ev.direction === "inbound" ? "↓" : "↑"}
+                </span>{" "}
+                <span className="text-fg">{ev.protocol}</span>
+                <span className="text-muted">
+                  {" "}
+                  · {ev.city}, {ev.country}
+                  {ev.process ? ` · ${ev.process}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-20">
+    <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-3 sm:p-5">
       <div className="vignette absolute inset-0" />
-      <div className="scanlines absolute inset-0 opacity-50" />
+      <div className="scanlines absolute inset-0" />
 
-      <header className="pointer-events-auto absolute left-3 right-3 top-3 z-30 flex flex-wrap items-center justify-between gap-2 sm:left-4 sm:right-4 sm:top-4">
-        <div className="panel-glass panel-glow-in flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 sm:gap-3 sm:px-4">
-          <Globe2 className="size-4 shrink-0 text-primary sm:size-5" />
-          <h1 className="text-sm font-semibold text-fg sm:text-base">
-            Earthlink
-          </h1>
-          <span
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase ${
-              mode === "real"
-                ? "border-primary/40 bg-primary/10 text-primary"
-                : "border-border text-muted"
-            }`}
-          >
-            {mode === "real" && (
-              <span className="pulse-dot size-1.5 rounded-full bg-primary" />
-            )}
-            {isReplay ? "REPLAY" : modeLabel}
-          </span>
-          <ActivitySpark samples={activityHistory} />
-          <div className="flex gap-0.5">
-            {PRESETS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setSecurityPreset(p.id)}
-                className={`rounded-md border px-1.5 py-1 font-mono text-[9px] uppercase sm:px-2 sm:text-[10px] ${
-                  securityPreset === p.id
-                    ? "border-primary/50 bg-primary/15 text-primary"
-                    : "border-border bg-surface text-muted hover:border-border-strong"
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
+      {/* TOP — full brand + tools (same richness as before) */}
+      <header className="pointer-events-auto relative flex flex-wrap items-start justify-between gap-3">
+        <div className="panel-glass panel-glow-in max-w-lg rounded-xl px-4 py-3 sm:px-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Globe2 className="size-5 text-primary" strokeWidth={1.75} />
+            <h1 className="text-base font-semibold tracking-tight text-fg sm:text-lg">
+              Earthlink
+            </h1>
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+                mode === "real"
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border bg-surface-elevated text-muted"
+              }`}
+            >
+              {mode === "real" && (
+                <span className="pulse-dot size-1.5 rounded-full bg-primary" />
+              )}
+              {isReplay ? "REPLAY" : modeLabel}
+            </span>
+          </div>
+          <p className="mt-1 max-w-md text-xs leading-relaxed text-muted sm:text-sm">
+            Process · ASN · fat arcs · heat trails · mute · presets · replay ·
+            alerts
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <ActivitySpark samples={activityHistory} />
+            <div className="flex flex-wrap gap-1">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSecurityPreset(p.id)}
+                  className={`rounded-md border px-2 py-1 font-mono text-[10px] uppercase transition ${
+                    securityPreset === p.id
+                      ? "border-primary/50 bg-primary/15 text-primary"
+                      : "border-border bg-surface text-muted hover:border-border-strong"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="panel-glass flex flex-wrap items-center gap-1 rounded-xl px-2 py-1.5 sm:gap-1.5 sm:px-2.5">
-          <IconBtn title="Kiosk" onClick={() => setKiosk(true)}>
+        <div className="panel-glass flex flex-wrap items-center gap-2 rounded-xl px-3 py-2">
+          <ToolBtn title="Kiosk" onClick={() => setKiosk(true)}>
             <Expand className="size-4" />
-          </IconBtn>
-          <IconBtn
+          </ToolBtn>
+          <ToolBtn
             title="Replay"
             active={showReplay || isReplay}
             onClick={() => {
@@ -384,8 +385,8 @@ export function Hud() {
             }}
           >
             <History className="size-4" />
-          </IconBtn>
-          <IconBtn
+          </ToolBtn>
+          <ToolBtn
             title="Alerts"
             active={alertsEnabled}
             onClick={() => setAlertsEnabled(!alertsEnabled)}
@@ -396,23 +397,23 @@ export function Hud() {
               <BellOff className="size-4" />
             )}
             {alerts.length > 0 && (
-              <span className="font-mono text-[9px] text-danger">
+              <span className="font-mono text-[10px] text-danger">
                 {alerts.length}
               </span>
             )}
-          </IconBtn>
-          <IconBtn
+          </ToolBtn>
+          <ToolBtn
             title="Muted"
             active={showMuted || enabledMutes > 0}
             warn
             onClick={() => setShowMuted((v) => !v)}
           >
             <Ban className="size-4" />
-            <span className="hidden font-mono text-[9px] sm:inline">
+            <span className="hidden font-mono text-xs sm:inline">
               {enabledMutes || mutedPeers.length}
             </span>
-          </IconBtn>
-          <IconBtn
+          </ToolBtn>
+          <ToolBtn
             title="Sound"
             onClick={() => {
               resumeFxAudio();
@@ -424,16 +425,16 @@ export function Hud() {
             ) : (
               <VolumeX className="size-4" />
             )}
-          </IconBtn>
-          <IconBtn
+          </ToolBtn>
+          <ToolBtn
             title="Pause"
             disabled={mode === "real"}
             onClick={() => setPaused(!paused)}
           >
             {paused ? <Play className="size-4" /> : <Pause className="size-4" />}
-          </IconBtn>
+          </ToolBtn>
           {mode !== "real" && (
-            <IconBtn
+            <ToolBtn
               title="Pulse"
               onClick={() => {
                 resumeFxAudio();
@@ -441,10 +442,10 @@ export function Hud() {
               }}
             >
               <Zap className="size-4" />
-            </IconBtn>
+            </ToolBtn>
           )}
           {mode === "demo" && (
-            <IconBtn
+            <ToolBtn
               title="Retry agent"
               onClick={() => {
                 setMode("connecting");
@@ -452,435 +453,443 @@ export function Hud() {
               }}
             >
               <Server className="size-4" />
-            </IconBtn>
+            </ToolBtn>
           )}
-          <IconBtn title="Clear" onClick={() => clear()}>
+          <ToolBtn title="Clear" onClick={() => clear()}>
             <Trash2 className="size-4" />
-          </IconBtn>
+          </ToolBtn>
         </div>
       </header>
 
-      <aside className="pointer-events-auto absolute left-3 top-[4.5rem] z-20 w-[min(100%,15.5rem)] sm:left-4 sm:top-20">
-        <div className="panel-glass overflow-hidden rounded-xl">
-          <div className="flex border-b border-border">
-            {(
-              [
-                ["stats", "Stats"],
-                ["talkers", "Talkers"],
-                ["alerts", `Alerts${alerts.length ? ` ${alerts.length}` : ""}`],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setLeftTab(id)}
-                className={`flex-1 px-2 py-2 font-mono text-[10px] uppercase tracking-wide ${
-                  leftTab === id
-                    ? "bg-primary/10 text-primary"
-                    : "text-faint hover:text-muted"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+      {/*
+        MIDDLE: three-column ring around the globe
+        Left stack = ALL panels visible (not tabbed)
+        Center = empty for globe + optional focus
+        Right = full connections
+      */}
+      <div className="pointer-events-none relative flex min-h-0 flex-1 items-stretch justify-between gap-3 py-3">
+        {/* LEFT COLUMN — traffic + talkers + alerts + home + mute, all open */}
+        <aside className="pointer-events-auto flex w-[min(100%,16.5rem)] shrink-0 flex-col gap-2.5 self-stretch overflow-y-auto">
+          {/* Traffic */}
+          <div className="panel-glass rounded-xl p-3 sm:p-4">
+            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-faint">
+              <Activity className="size-3.5 text-accent" />
+              Traffic
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[10px] uppercase text-faint">Active</p>
+                <p className="font-mono text-2xl font-semibold text-primary text-glow">
+                  {active}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-faint">Seen</p>
+                <p className="font-mono text-2xl font-semibold text-fg">
+                  {totalSeen}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-primary/25 bg-primary/10 px-2 py-1.5">
+                <p className="flex items-center gap-1 text-[9px] uppercase text-primary">
+                  <ArrowDownLeft className="size-3" /> In
+                </p>
+                <p className="font-mono text-lg font-semibold text-primary">
+                  {inboundCount}
+                </p>
+              </div>
+              <div className="rounded-lg border border-warn/25 bg-warn/10 px-2 py-1.5">
+                <p className="flex items-center gap-1 text-[9px] uppercase text-warn">
+                  <ArrowUpRight className="size-3" /> Out
+                </p>
+                <p className="font-mono text-lg font-semibold text-warn">
+                  {outboundCount}
+                </p>
+              </div>
+            </div>
+            {(enabledMutes > 0 || mutedActiveCount > 0) && (
+              <p className="mt-2 font-mono text-[10px] text-faint">
+                {enabledMutes} muted
+                {mutedActiveCount ? ` · ${mutedActiveCount} hidden live` : ""}
+              </p>
+            )}
+            {topCountries.length > 0 && (
+              <div className="mt-3 border-t border-border pt-3">
+                <p className="text-[10px] uppercase text-faint">Hot countries</p>
+                <ul className="mt-1.5 space-y-1">
+                  {topCountries.map(([cc, n]) => (
+                    <li
+                      key={cc}
+                      className="flex justify-between font-mono text-xs text-muted"
+                    >
+                      <span className="text-fg">{cc}</span>
+                      <span className="text-primary">{n}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {mode !== "real" && (
+              <div className="mt-3">
+                <p className="text-[10px] uppercase text-faint">Demo intensity</p>
+                <div className="mt-1.5 flex gap-1">
+                  {(["calm", "normal", "busy"] as const).map((level) => (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => setIntensity(level)}
+                      className={`flex-1 rounded-md border px-2 py-1.5 font-mono text-[10px] uppercase ${
+                        intensity === level
+                          ? "border-primary/50 bg-primary/15 text-primary"
+                          : "border-border bg-surface text-muted"
+                      }`}
+                    >
+                      {level}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {agentError && mode !== "real" && (
+              <p className="mt-2 font-mono text-[10px] text-danger">
+                Agent: {agentError}
+              </p>
+            )}
           </div>
 
-          <div className="max-h-[min(42vh,22rem)] overflow-y-auto p-3">
-            {leftTab === "stats" && (
-              <>
-                <div className="grid grid-cols-2 gap-2">
-                  <MiniStat label="Active" value={String(active)} accent />
-                  <MiniStat label="Seen" value={String(totalSeen)} />
-                </div>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border border-primary/25 bg-primary/10 px-2 py-1.5">
-                    <p className="flex items-center gap-1 text-[9px] uppercase text-primary">
-                      <ArrowDownLeft className="size-3" /> In
+          {/* Top talkers — always visible */}
+          <div className="panel-glass rounded-xl p-3 sm:p-4">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-faint">
+              Top talkers
+            </p>
+            <ul className="mt-2 space-y-1.5">
+              {topTalkers.length === 0 ? (
+                <li className="text-xs text-muted">Waiting for rates…</li>
+              ) : (
+                topTalkers.slice(0, 6).map((t) => (
+                  <li key={t.ip} className="font-mono text-[10px]">
+                    <div className="flex justify-between gap-1 text-fg">
+                      <span className="truncate">
+                        {t.city || t.ip}
+                        {t.process ? ` · ${t.process}` : ""}
+                      </span>
+                      <span className="shrink-0 text-accent">
+                        {formatRate(t.bytesPerSec)}
+                      </span>
+                    </div>
+                    <p className="truncate text-faint">
+                      {t.org || t.protocol} · {t.ip}
                     </p>
-                    <p className="font-mono text-lg font-semibold text-primary">
-                      {inboundCount}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-warn/25 bg-warn/10 px-2 py-1.5">
-                    <p className="flex items-center gap-1 text-[9px] uppercase text-warn">
-                      <ArrowUpRight className="size-3" /> Out
-                    </p>
-                    <p className="font-mono text-lg font-semibold text-warn">
-                      {outboundCount}
-                    </p>
-                  </div>
-                </div>
-                {(enabledMutes > 0 || mutedActiveCount > 0) && (
-                  <p className="mt-2 font-mono text-[10px] text-faint">
-                    {enabledMutes} muted
-                    {mutedActiveCount
-                      ? ` · ${mutedActiveCount} hidden live`
-                      : ""}
-                  </p>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+
+          {/* Alerts — always visible */}
+          <div className="panel-glass rounded-xl p-3 sm:p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase text-faint">
+                <Shield className="size-3.5 text-danger" />
+                Alerts
+                {alerts.length > 0 && (
+                  <span className="rounded-full bg-danger/15 px-1.5 font-mono text-[10px] text-danger">
+                    {alerts.length}
+                  </span>
                 )}
-                {topCountries.length > 0 && (
-                  <div className="mt-3 border-t border-border pt-2">
-                    <p className="text-[10px] uppercase text-faint">Countries</p>
-                    <ul className="mt-1 space-y-0.5">
-                      {topCountries.map(([cc, n]) => (
-                        <li
-                          key={cc}
-                          className="flex justify-between font-mono text-xs text-muted"
-                        >
-                          <span className="text-fg">{cc}</span>
-                          <span className="text-primary">{n}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {mode !== "real" && (
-                  <div className="mt-3 flex gap-1">
-                    {(["calm", "normal", "busy"] as const).map((level) => (
+              </div>
+              {alerts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => clearAlerts()}
+                  className="text-[10px] text-muted hover:text-fg"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <ul className="mt-2 max-h-28 space-y-1.5 overflow-y-auto">
+              {alerts.length === 0 ? (
+                <li className="text-xs text-muted">No alerts yet</li>
+              ) : (
+                alerts.slice(0, 8).map((a) => (
+                  <li
+                    key={a.id}
+                    className={`rounded-md border px-2 py-1 font-mono text-[10px] ${
+                      a.level === "danger"
+                        ? "border-danger/30 bg-danger/10 text-danger"
+                        : a.level === "warn"
+                          ? "border-warn/30 bg-warn/10 text-warn"
+                          : "border-border bg-surface text-muted"
+                    }`}
+                  >
+                    {a.text}
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+
+          {/* Home */}
+          <div className="panel-glass rounded-xl p-3 sm:p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase text-faint">
+                <MapPin className="size-3.5 text-accent" />
+                Home
+              </div>
+              <button
+                type="button"
+                onClick={onRelocate}
+                disabled={locating || mode === "real"}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface-elevated px-2 text-[11px] text-muted disabled:opacity-50"
+              >
+                <Crosshair
+                  className={`size-3.5 ${locating ? "animate-spin" : ""}`}
+                />
+                {locating ? "…" : "Locate"}
+              </button>
+            </div>
+            <p className="mt-2 text-sm font-medium text-fg">
+              {homeReady || home.source !== "default"
+                ? home.label
+                : "Locating…"}
+            </p>
+            <p className="mt-0.5 font-mono text-[11px] text-muted">
+              {home.lat.toFixed(4)}°, {home.lon.toFixed(4)}°
+            </p>
+            {home.ip && (
+              <p className="mt-0.5 font-mono text-[11px] text-faint">
+                IP {home.ip}
+              </p>
+            )}
+            {home.org && (
+              <p className="mt-0.5 font-mono text-[10px] text-faint">{home.org}</p>
+            )}
+          </div>
+
+          {/* Muted — open by default when any mutes exist */}
+          {(showMuted || mutedPeers.length > 0) && (
+            <div className="panel-glass rounded-xl p-3 sm:p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-medium uppercase text-faint">
+                  <Ban className="size-3.5 text-warn" />
+                  Muted IPs
+                </div>
+                <button type="button" onClick={() => setShowMuted(false)}>
+                  <X className="size-3.5 text-muted" />
+                </button>
+              </div>
+              <form
+                className="mt-2 flex gap-1.5"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const raw = muteInput.trim();
+                  if (addMuteFromInput(raw)) {
+                    void syncMuteToServer("mute", raw);
+                    setMuteInput("");
+                  }
+                }}
+              >
+                <input
+                  value={muteInput}
+                  onChange={(e) => setMuteInput(e.target.value)}
+                  placeholder="8.8.8.8"
+                  className="h-8 min-w-0 flex-1 rounded-md border border-border bg-surface-elevated px-2 font-mono text-[11px] text-fg outline-none"
+                />
+                <button
+                  type="submit"
+                  className="inline-flex h-8 items-center rounded-md border border-warn/30 bg-warn/10 px-2 text-warn"
+                >
+                  <Plus className="size-3.5" />
+                </button>
+              </form>
+              <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto">
+                {mutedPeers.length === 0 ? (
+                  <li className="text-xs text-muted">None muted</li>
+                ) : (
+                  mutedPeers.map((p) => (
+                    <li
+                      key={p.ip}
+                      className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5"
+                    >
                       <button
-                        key={level}
                         type="button"
-                        onClick={() => setIntensity(level)}
-                        className={`flex-1 rounded-md border px-1 py-1 font-mono text-[9px] uppercase ${
-                          intensity === level
-                            ? "border-primary/50 bg-primary/15 text-primary"
-                            : "border-border text-muted"
+                        onClick={() => onToggleMuteEnabled(p.ip, !p.enabled)}
+                        className={p.enabled ? "text-warn" : "text-faint"}
+                      >
+                        {p.enabled ? (
+                          <EyeOff className="size-3.5" />
+                        ) : (
+                          <Eye className="size-3.5" />
+                        )}
+                      </button>
+                      <span
+                        className={`min-w-0 flex-1 truncate font-mono text-[11px] ${
+                          p.enabled ? "text-fg" : "text-faint line-through"
                         }`}
                       >
-                        {level}
+                        {p.ip}
+                      </span>
+                      <button type="button" onClick={() => onUnmute(p.ip)}>
+                        <Trash2 className="size-3 text-muted hover:text-danger" />
                       </button>
-                    ))}
-                  </div>
-                )}
-                {agentError && mode !== "real" && (
-                  <p className="mt-2 font-mono text-[10px] text-danger">
-                    {agentError}
-                  </p>
-                )}
-              </>
-            )}
-
-            {leftTab === "talkers" && (
-              <ul className="space-y-2">
-                {topTalkers.length === 0 ? (
-                  <li className="text-xs text-muted">No talkers yet</li>
-                ) : (
-                  topTalkers.slice(0, 8).map((t) => (
-                    <li key={t.ip} className="font-mono text-[10px]">
-                      <div className="flex justify-between gap-1 text-fg">
-                        <span className="truncate">
-                          {t.city || t.ip}
-                          {t.process ? ` · ${t.process}` : ""}
-                        </span>
-                        <span className="shrink-0 text-accent">
-                          {formatRate(t.bytesPerSec)}
-                        </span>
-                      </div>
-                      <p className="truncate text-faint">
-                        {t.org || t.protocol} · {t.ip}
-                      </p>
                     </li>
                   ))
                 )}
               </ul>
-            )}
+            </div>
+          )}
 
-            {leftTab === "alerts" && (
-              <>
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="flex items-center gap-1 text-[10px] uppercase text-faint">
-                    <Shield className="size-3 text-danger" /> Live
-                  </span>
-                  {alerts.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => clearAlerts()}
-                      className="text-[10px] text-muted hover:text-fg"
-                    >
-                      Clear
-                    </button>
-                  )}
+          {/* Focus under left stack on narrow; also bottom-center on wide */}
+          {selected && (
+            <div className="panel-glass panel-glow-in rounded-xl p-3 sm:p-4 lg:hidden">
+              <FocusCard
+                selected={selected}
+                onClose={() => setSelectedId(null)}
+                onMute={() =>
+                  onMute(
+                    selected.ip,
+                    `${selected.city} · ${selected.protocol}`,
+                  )
+                }
+              />
+            </div>
+          )}
+        </aside>
+
+        {/* CENTER — free for globe; focus floats here on large screens */}
+        <div className="pointer-events-none relative hidden min-w-0 flex-1 lg:block">
+          {selected && (
+            <div className="pointer-events-auto absolute bottom-0 left-1/2 w-[min(100%,20rem)] -translate-x-1/2">
+              <div className="panel-glass panel-glow-in rounded-xl p-3 sm:p-4">
+                <FocusCard
+                  selected={selected}
+                  onClose={() => setSelectedId(null)}
+                  onMute={() =>
+                    onMute(
+                      selected.ip,
+                      `${selected.city} · ${selected.protocol}`,
+                    )
+                  }
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT — connections full height (fills right empty band) */}
+        <aside className="pointer-events-auto hidden w-[min(100%,18rem)] shrink-0 flex-col self-stretch md:flex">
+          <div className="panel-glass flex min-h-0 flex-1 flex-col rounded-xl">
+            <div className="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-medium uppercase text-faint">
+                  <Radio className="size-3.5 text-primary" />
+                  Connections
                 </div>
-                {alerts.length === 0 ? (
-                  <p className="text-xs text-muted">No alerts</p>
-                ) : (
-                  <ul className="space-y-1.5">
-                    {alerts.slice(0, 10).map((a) => (
-                      <li
-                        key={a.id}
-                        className={`rounded-md border px-2 py-1 font-mono text-[10px] ${
-                          a.level === "danger"
-                            ? "border-danger/30 bg-danger/10 text-danger"
-                            : a.level === "warn"
-                              ? "border-warn/30 bg-warn/10 text-warn"
-                              : "border-border text-muted"
+                <span className="font-mono text-[10px] text-muted">
+                  {filtered.length}
+                </span>
+              </div>
+              <label className="relative block">
+                <select
+                  value={connFilter}
+                  onChange={(e) => setConnFilter(e.target.value)}
+                  className="h-9 w-full appearance-none rounded-lg border border-border bg-surface-elevated py-1.5 pl-3 pr-8 font-mono text-[11px] text-fg outline-none"
+                >
+                  {STATIC_FILTERS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint" />
+              </label>
+            </div>
+            <ul className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+              {filtered.length === 0 ? (
+                <li className="px-2 py-6 text-center text-xs text-muted">
+                  No visible connections
+                </li>
+              ) : (
+                filtered.slice(0, 48).map((c) => {
+                  const age = now - c.createdAt;
+                  const remaining = Math.max(0, c.ttl - age);
+                  const inbound = c.direction === "inbound";
+                  const isSel = c.id === selectedId;
+                  return (
+                    <li key={c.id} className="group relative">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          resumeFxAudio();
+                          setSelectedId(isSel ? null : c.id);
+                        }}
+                        className={`w-full rounded-lg px-2.5 py-2 pr-9 text-left hover:bg-surface-elevated/80 ${
+                          isSel ? "conn-row-selected" : ""
                         }`}
                       >
-                        {a.text}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      </aside>
-
-      <aside className="pointer-events-auto absolute bottom-[7.5rem] right-3 top-[4.5rem] z-20 hidden w-[min(100%,17.5rem)] flex-col md:flex sm:right-4 sm:top-20">
-        <div className="panel-glass flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl">
-          <div className="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-medium uppercase text-faint">
-                <Radio className="size-3.5 text-primary" />
-                Connections
-              </div>
-              <span className="font-mono text-[10px] text-muted">
-                {filtered.length}
-              </span>
-            </div>
-            <label className="relative block">
-              <select
-                value={connFilter}
-                onChange={(e) => setConnFilter(e.target.value)}
-                className="h-8 w-full appearance-none rounded-lg border border-border bg-surface-elevated py-1 pl-2.5 pr-7 font-mono text-[11px] text-fg outline-none"
-              >
-                {STATIC_FILTERS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-faint" />
-            </label>
-          </div>
-          <ul className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5">
-            {filtered.length === 0 ? (
-              <li className="px-2 py-6 text-center text-xs text-muted">
-                No visible connections
-              </li>
-            ) : (
-              filtered.slice(0, 48).map((c) => {
-                const age = now - c.createdAt;
-                const remaining = Math.max(0, c.ttl - age);
-                const inbound = c.direction === "inbound";
-                const isSel = c.id === selectedId;
-                return (
-                  <li key={c.id} className="group relative">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        resumeFxAudio();
-                        setSelectedId(isSel ? null : c.id);
-                      }}
-                      className={`w-full rounded-lg px-2 py-1.5 pr-8 text-left hover:bg-surface-elevated/80 ${
-                        isSel ? "conn-row-selected" : ""
-                      }`}
-                    >
-                      <p className="truncate text-[13px] font-medium text-fg">
-                        <span
-                          className={`mr-1 inline-flex rounded px-1 py-0.5 font-mono text-[9px] uppercase ${
-                            inbound
-                              ? "bg-primary/15 text-primary"
-                              : "bg-warn/15 text-warn"
-                          }`}
-                        >
-                          {inbound ? "in" : "out"}
-                        </span>
-                        {c.city}
-                        <span className="ml-1 font-normal text-muted">
-                          {c.country}
-                        </span>
-                      </p>
-                      <p className="truncate font-mono text-[10px] text-faint">
-                        {c.ip}:{c.port} · {c.protocol}
-                        {c.process ? ` · ${c.process}` : ""}
-                      </p>
-                      {(c.org || c.bytesPerSec) && (
-                        <p className="truncate font-mono text-[10px] text-faint">
-                          {c.org || "—"}
-                          {c.bytesPerSec
-                            ? ` · ${formatRate(c.bytesPerSec)}`
-                            : ""}
+                        <p className="truncate text-sm font-medium text-fg">
+                          <span
+                            className={`mr-1.5 inline-flex items-center rounded px-1 py-0.5 font-mono text-[9px] uppercase ${
+                              inbound
+                                ? "bg-primary/15 text-primary"
+                                : "bg-warn/15 text-warn"
+                            }`}
+                          >
+                            {inbound ? "in" : "out"}
+                          </span>
+                          {c.city}
+                          <span className="ml-1 font-normal text-muted">
+                            {c.country}
+                          </span>
                         </p>
-                      )}
-                      <div className="mt-0.5 flex justify-between text-[10px] text-muted">
-                        <span>{c.distanceKm.toLocaleString()} km</span>
-                        <span className="text-primary">
-                          {c.real && c.live ? "●" : formatAge(remaining)}
-                        </span>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onMute(c.ip, `${c.city} · ${c.protocol}`);
-                      }}
-                      className="absolute right-1 top-1.5 rounded p-1 text-faint hover:bg-warn/10 hover:text-warn"
-                      title={`Mute ${c.ip}`}
-                    >
-                      <Ban className="size-3.5" />
-                    </button>
-                  </li>
-                );
-              })
-            )}
-          </ul>
-        </div>
-      </aside>
-
-      <div className="pointer-events-auto absolute bottom-[7.5rem] left-3 z-20 flex w-[min(100%,15.5rem)] flex-col gap-2 sm:left-4">
-        <div className="panel-glass rounded-xl px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-1.5 text-[10px] font-medium uppercase text-faint">
-              <MapPin className="size-3.5 shrink-0 text-accent" />
-              Home
-            </div>
-            <button
-              type="button"
-              onClick={onRelocate}
-              disabled={locating || mode === "real"}
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-surface-elevated px-1.5 text-[10px] text-muted disabled:opacity-50"
-            >
-              <Crosshair
-                className={`size-3 ${locating ? "animate-spin" : ""}`}
-              />
-            </button>
-          </div>
-          <p className="mt-1 truncate text-sm font-medium text-fg">
-            {homeReady || home.source !== "default" ? home.label : "Locating…"}
-          </p>
-          <p className="font-mono text-[10px] text-muted">
-            {home.lat.toFixed(2)}°, {home.lon.toFixed(2)}°
-            {home.ip ? ` · ${home.ip}` : ""}
-          </p>
-        </div>
-
-        {(showMuted || mutedPeers.length > 0) && (
-          <div className="panel-glass max-h-40 overflow-hidden rounded-xl px-3 py-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-faint">
-                <Ban className="size-3.5 text-warn" />
-                Mute
-              </div>
-              <button type="button" onClick={() => setShowMuted(false)}>
-                <X className="size-3.5 text-muted" />
-              </button>
-            </div>
-            <form
-              className="mt-1.5 flex gap-1"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const raw = muteInput.trim();
-                if (addMuteFromInput(raw)) {
-                  void syncMuteToServer("mute", raw);
-                  setMuteInput("");
-                }
-              }}
-            >
-              <input
-                value={muteInput}
-                onChange={(e) => setMuteInput(e.target.value)}
-                placeholder="8.8.8.8"
-                className="h-7 min-w-0 flex-1 rounded-md border border-border bg-surface-elevated px-2 font-mono text-[10px] text-fg outline-none"
-              />
-              <button
-                type="submit"
-                className="inline-flex h-7 items-center rounded-md border border-warn/30 bg-warn/10 px-1.5 text-warn"
-              >
-                <Plus className="size-3.5" />
-              </button>
-            </form>
-            <ul className="mt-1.5 max-h-20 space-y-1 overflow-y-auto">
-              {mutedPeers.map((p) => (
-                <li
-                  key={p.ip}
-                  className="flex items-center gap-1 rounded border border-border px-1.5 py-1"
-                >
-                  <button
-                    type="button"
-                    onClick={() => onToggleMuteEnabled(p.ip, !p.enabled)}
-                    className={p.enabled ? "text-warn" : "text-faint"}
-                  >
-                    {p.enabled ? (
-                      <EyeOff className="size-3" />
-                    ) : (
-                      <Eye className="size-3" />
-                    )}
-                  </button>
-                  <span
-                    className={`min-w-0 flex-1 truncate font-mono text-[10px] ${
-                      p.enabled ? "text-fg" : "text-faint line-through"
-                    }`}
-                  >
-                    {p.ip}
-                  </span>
-                  <button type="button" onClick={() => onUnmute(p.ip)}>
-                    <Trash2 className="size-3 text-muted hover:text-danger" />
-                  </button>
-                </li>
-              ))}
+                        <p className="truncate font-mono text-[11px] text-faint">
+                          {c.ip}:{c.port} · {c.protocol}
+                          {c.process ? ` · ${c.process}` : ""}
+                        </p>
+                        {(c.org || c.bytesPerSec) && (
+                          <p className="truncate font-mono text-[10px] text-faint">
+                            {c.org || "—"}
+                            {c.bytesPerSec
+                              ? ` · ${formatRate(c.bytesPerSec)}`
+                              : ""}
+                          </p>
+                        )}
+                        <div className="mt-1 flex justify-between text-[10px] text-muted">
+                          <span>{c.distanceKm.toLocaleString()} km</span>
+                          <span className="text-primary">
+                            {c.real && c.live ? "●" : formatAge(remaining)}
+                          </span>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMute(c.ip, `${c.city} · ${c.protocol}`);
+                        }}
+                        className="absolute right-1.5 top-2 rounded-md p-1.5 text-faint hover:bg-warn/10 hover:text-warn"
+                        title={`Mute ${c.ip}`}
+                      >
+                        <Ban className="size-3.5" />
+                      </button>
+                    </li>
+                  );
+                })
+              )}
             </ul>
           </div>
-        )}
+        </aside>
       </div>
 
-      {selected && (
-        <div className="pointer-events-auto absolute bottom-[7.5rem] left-1/2 z-20 w-[min(100%-2rem,18rem)] -translate-x-1/2 sm:bottom-32">
-          <div className="panel-glass panel-glow-in rounded-xl px-3 py-2.5">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-[10px] font-medium uppercase text-faint">
-                  Focus
-                </p>
-                <p className="truncate text-sm font-semibold text-fg">
-                  {selected.city}, {selected.country}
-                </p>
-                <p className="truncate font-mono text-[11px] text-accent">
-                  {selected.protocol}
-                  {selected.process ? ` · ${selected.process}` : ""}
-                </p>
-                {selected.org && (
-                  <p className="truncate font-mono text-[10px] text-muted">
-                    {selected.as || selected.org}
-                  </p>
-                )}
-                <p className="font-mono text-[10px] text-faint">
-                  {selected.ip}:{selected.port}
-                  {selected.httpPath
-                    ? ` · ${selected.httpMethod} ${selected.httpPath}`
-                    : ""}
-                </p>
-                <p className="mt-0.5 text-[10px] text-faint">
-                  {selected.distanceKm.toLocaleString()} km ·{" "}
-                  {formatRate(selected.bytesPerSec || 0)} ·{" "}
-                  {formatBytes(selected.bytes || 0)}
-                </p>
-              </div>
-              <button type="button" onClick={() => setSelectedId(null)}>
-                <X className="size-3.5 text-muted" />
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() =>
-                onMute(selected.ip, `${selected.city} · ${selected.protocol}`)
-              }
-              className="mt-2 inline-flex h-7 w-full items-center justify-center gap-1 rounded-md border border-warn/35 bg-warn/10 text-[11px] text-warn"
-            >
-              <Ban className="size-3" /> Mute IP
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="pointer-events-auto absolute bottom-3 left-3 right-3 z-30 space-y-2 sm:bottom-4 sm:left-4 sm:right-4">
+      {/* BOTTOM — replay + feed */}
+      <div className="pointer-events-auto relative z-10 space-y-2">
         {showReplay && (
-          <div className="panel-glass rounded-xl px-3 py-2">
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <History className="size-4 shrink-0 text-accent" />
-              <span className="text-[10px] font-medium uppercase text-faint">
+          <div className="panel-glass rounded-xl px-4 py-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <History className="size-4 text-accent" />
+              <span className="text-xs font-medium uppercase text-faint">
                 Replay
               </span>
               <input
@@ -889,12 +898,12 @@ export function Hud() {
                 max={historyMax}
                 value={replayMs ?? historyMax}
                 onChange={(e) => setReplayMs(Number(e.target.value))}
-                className="min-w-[8rem] flex-1 accent-[var(--color-accent)]"
+                className="min-w-[12rem] flex-1 accent-[var(--color-accent)]"
               />
               <button
                 type="button"
                 onClick={() => setReplayMs(null)}
-                className={`rounded-md border px-2 py-0.5 font-mono text-[10px] uppercase ${
+                className={`rounded-md border px-2 py-1 font-mono text-[10px] uppercase ${
                   replayMs == null
                     ? "border-primary/40 bg-primary/10 text-primary"
                     : "border-border text-muted"
@@ -903,7 +912,7 @@ export function Hud() {
                 Live
               </button>
               <span className="font-mono text-[10px] text-faint">
-                {history.length} evt
+                {history.length} events
               </span>
             </div>
           </div>
@@ -914,13 +923,13 @@ export function Hud() {
             <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.14em] text-accent">
               Feed
             </span>
-            <ul className="flex min-w-0 flex-1 gap-5 overflow-x-auto">
+            <ul className="flex min-w-0 flex-1 gap-6 overflow-x-auto">
               {events.length === 0 ? (
                 <li className="font-mono text-[11px] text-faint">
                   Waiting for peers…
                 </li>
               ) : (
-                events.slice(0, 14).map((ev) => (
+                events.slice(0, 12).map((ev) => (
                   <li
                     key={`${ev.id}-${ev.at}`}
                     className="shrink-0 font-mono text-[11px]"
@@ -939,6 +948,7 @@ export function Hud() {
                       {" "}
                       · {ev.city}
                       {ev.process ? ` · ${ev.process}` : ""}
+                      {ev.org ? ` · ${ev.org}` : ""}
                     </span>
                   </li>
                 ))
@@ -947,10 +957,11 @@ export function Hud() {
           </div>
         </div>
 
+        {/* Mobile connections */}
         <div className="panel-glass rounded-xl md:hidden">
           <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
             <span className="flex items-center gap-1 text-[10px] uppercase text-faint">
-              <Radio className="size-3 text-primary" /> Recent
+              <Radio className="size-3 text-primary" /> Connections
             </span>
             <select
               value={connFilter}
@@ -995,7 +1006,66 @@ export function Hud() {
   );
 }
 
-function IconBtn({
+function FocusCard({
+  selected,
+  onClose,
+  onMute,
+}: {
+  selected: Connection;
+  onClose: () => void;
+  onMute: () => void;
+}) {
+  return (
+    <>
+      <div className="flex items-start justify-between">
+        <p className="text-xs font-medium uppercase text-faint">Focus</p>
+        <button type="button" onClick={onClose}>
+          <X className="size-3.5 text-muted" />
+        </button>
+      </div>
+      <p className="mt-1 text-sm font-semibold text-fg">
+        {selected.city}, {selected.country}
+      </p>
+      <p className="mt-0.5 font-mono text-[11px] text-accent">
+        {selected.protocol} · {selected.direction}
+        {selected.process ? ` · ${selected.process}` : ""}
+      </p>
+      {selected.org && (
+        <p className="mt-0.5 font-mono text-[10px] text-muted">
+          {selected.as || selected.org}
+        </p>
+      )}
+      <p className="mt-1 font-mono text-[11px] text-muted">
+        {selected.ip}:{selected.port}
+      </p>
+      {selected.httpPath && (
+        <p className="mt-1 truncate font-mono text-[10px] text-primary">
+          {selected.httpMethod} {selected.httpPath}
+        </p>
+      )}
+      {selected.iface && (
+        <p className="mt-0.5 font-mono text-[10px] text-faint">
+          iface {selected.iface}
+        </p>
+      )}
+      <p className="mt-1 text-[11px] text-faint">
+        {selected.distanceKm.toLocaleString()} km ·{" "}
+        {formatRate(selected.bytesPerSec || 0)} ·{" "}
+        {formatBytes(selected.bytes || 0)}
+      </p>
+      <button
+        type="button"
+        onClick={onMute}
+        className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-warn/35 bg-warn/10 text-xs text-warn"
+      >
+        <Ban className="size-3.5" />
+        Mute this IP
+      </button>
+    </>
+  );
+}
+
+function ToolBtn({
   children,
   onClick,
   title,
@@ -1016,7 +1086,7 @@ function IconBtn({
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex h-9 items-center gap-1 rounded-lg border px-2.5 text-sm transition disabled:opacity-40 ${
+      className={`inline-flex h-10 items-center gap-1.5 rounded-lg border px-3 text-sm transition disabled:opacity-40 ${
         active
           ? warn
             ? "border-warn/40 bg-warn/10 text-warn"
@@ -1026,28 +1096,5 @@ function IconBtn({
     >
       {children}
     </button>
-  );
-}
-
-function MiniStat({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
-  return (
-    <div>
-      <p className="text-[9px] uppercase tracking-wider text-faint">{label}</p>
-      <p
-        className={`font-mono text-xl font-semibold tabular-nums ${
-          accent ? "text-primary text-glow" : "text-fg"
-        }`}
-      >
-        {value}
-      </p>
-    </div>
   );
 }

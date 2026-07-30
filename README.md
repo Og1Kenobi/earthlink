@@ -5,27 +5,27 @@
 Self-host on your server: every public TCP / UDP / DNS / ping peer lights up as a pin and arc to your home location, hangs around, then fades. Inbound is green, outbound is amber.
 
 <p align="center">
-  <img src="docs/screenshots/desktop-globe.png" alt="Earthlink desktop — denser HUD around the globe" width="100%" />
+  <img src="docs/screenshots/desktop-globe.png" alt="Earthlink desktop — full NOC panels around the globe" width="100%" />
 </p>
 
-| Desktop (talkers / filters) | Mobile |
+| Desktop | Mobile |
 | --- | --- |
-| <img src="docs/screenshots/desktop-filtered.png" alt="Earthlink desktop with talkers tab" /> | <img src="docs/screenshots/mobile.png" alt="Earthlink on mobile" /> |
+| <img src="docs/screenshots/desktop-filtered.png" alt="Earthlink connections panel" /> | <img src="docs/screenshots/mobile.png" alt="Earthlink on mobile" /> |
 
 ---
 
 ## Layout
 
-HUD is corner-docked so the **globe stays center stage**:
+Everything stays **visible at once** (no tab-hiding):
 
 | Zone | Content |
 | --- | --- |
-| **Top** | Brand, LIVE badge, sparkline, presets, tools |
-| **Upper-left** | Tabbed **Stats · Talkers · Alerts** (one panel) |
-| **Right** | Full-height **Connections** list + filter |
-| **Lower-left** | **Home** + **Mute** drawer |
-| **Bottom** | **Feed** ticker (+ replay scrubber when open) |
-| **Bottom-center** | **Focus** card when a connection is selected |
+| **Top-left** | Brand, LIVE, sparkline, security presets |
+| **Top-right** | Kiosk · replay · alerts · mute · sound · tools |
+| **Left stack** | Traffic · Top talkers · Alerts · Home · Muted IPs |
+| **Right** | Full-height **Connections** + filter |
+| **Bottom** | Feed ticker (+ replay scrubber when open) |
+| **Center-bottom** | Focus card when a connection is selected |
 
 Kiosk mode strips chrome for wall / TV use.
 
@@ -38,7 +38,7 @@ Kiosk mode strips chrome for wall / TV use.
 - **Process names** — `ss -p` / inode map
 - **ASN / org** on focus + talkers
 - **Bandwidth-weighted arcs** + **heat trails**
-- **Presets** — All · Sec · Web · Quiet
+- **Presets** — All · Security · Web · Noise off
 - **Mute IPs** — hide DNS forwarders; toggle back on
 - **Replay scrubber** — recent open/close events
 - **Alerts** — new country, SSH from new /24
