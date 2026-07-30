@@ -1,6 +1,16 @@
 import { readAllConnections, isPrivateIp } from "./connections.mjs";
 import { lookupMany, lookupSelf } from "./geoip.mjs";
 
+function parseMuteEnv() {
+  const raw = process.env.EARTHLINK_MUTE_IPS || "";
+  return new Set(
+    raw
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+}
+
 /**
  * Live traffic collector — polls sockets, geolocates remotes, tracks lifetimes.
  * TCP (+handshake), UDP (DNS/NTP/QUIC…), ICMP/ping when conntrack is on.
@@ -14,6 +24,9 @@ export function createTrafficCollector(options = {}) {
   // inbound | outbound | both
   const directions =
     options.directions ?? process.env.EARTHLINK_DIRECTIONS ?? "both";
+
+  /** Runtime mute list (plus EARTHLINK_MUTE_IPS env). */
+  const mutedIps = parseMuteEnv();
 
   /** @type {Map<string, object>} */
   const active = new Map();
@@ -61,6 +74,28 @@ export function createTrafficCollector(options = {}) {
     return directions === dir;
   }
 
+  function isMuted(ip) {
+    return mutedIps.has(ip);
+  }
+
+  function muteIp(ip) {
+    const clean = String(ip || "").trim();
+    if (!clean) return false;
+    mutedIps.add(clean);
+    for (const [k, v] of active) {
+      if (v.ip === clean) active.delete(k);
+    }
+    return true;
+  }
+
+  function unmuteIp(ip) {
+    return mutedIps.delete(String(ip || "").trim());
+  }
+
+  function listMuted() {
+    return [...mutedIps].sort();
+  }
+
   async function pollOnce() {
     if (polling) return;
     polling = true;
@@ -80,6 +115,7 @@ export function createTrafficCollector(options = {}) {
       }
 
       const candidates = socks.filter((s) => {
+        if (isMuted(s.remoteIp)) return false;
         if (!directionAllowed(s.direction)) return false;
         if (includePrivate) return true;
         return !s.private && !isPrivateIp(s.remoteIp);
@@ -222,6 +258,7 @@ export function createTrafficCollector(options = {}) {
       outboundCount,
       totalTracked: connections.length,
       sources: lastSources,
+      mutedIps: listMuted(),
       serverTime: now,
       hostname: process.env.EARTHLINK_HOSTNAME || undefined,
       listenHint: process.env.EARTHLINK_LISTEN || "0.0.0.0:8080",
@@ -242,5 +279,15 @@ export function createTrafficCollector(options = {}) {
     timer = null;
   }
 
-  return { start, stop, pollOnce, snapshot, ensureHome };
+  return {
+    start,
+    stop,
+    pollOnce,
+    snapshot,
+    ensureHome,
+    muteIp,
+    unmuteIp,
+    listMuted,
+    isMuted,
+  };
 }

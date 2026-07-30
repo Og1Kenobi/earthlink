@@ -4,6 +4,7 @@ import { Line } from "@react-three/drei";
 import * as THREE from "three";
 import {
   connectionLife,
+  isIpMuted,
   protocolWeight,
   useConnectionStore,
   type Connection,
@@ -183,7 +184,6 @@ function ConnectionArc({
         />
       </group>
 
-      {/* Residual heat bloom under the pin */}
       <mesh ref={heatRef} position={remotePos} renderOrder={10}>
         <sphereGeometry args={[0.028, 12, 12]} />
         <meshBasicMaterial
@@ -315,9 +315,15 @@ function useVisibleConnections(connections: Connection[], max = 24) {
 
 export function ConnectionsLayer() {
   const connections = useConnectionStore((s) => s.connections);
+  const mutedPeers = useConnectionStore((s) => s.mutedPeers);
   const home = useConnectionStore((s) => s.home);
   const selectedId = useConnectionStore((s) => s.selectedId);
-  const visible = useVisibleConnections(connections, 28);
+
+  const unmuted = useMemo(
+    () => connections.filter((c) => !isIpMuted(c.ip, mutedPeers)),
+    [connections, mutedPeers],
+  );
+  const visible = useVisibleConnections(unmuted, 28);
 
   useFrame(() => {
     useConnectionStore.getState().tick(performance.now());

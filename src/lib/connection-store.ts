@@ -9,6 +9,13 @@ import {
 import { haversineKm } from "./geo";
 import type { HomeSource } from "./home-location";
 import { playConnectionBlip, setFxAudioEnabled } from "./fx-audio";
+import {
+  isIpMuted,
+  loadMutedPeers,
+  normalizeIpInput,
+  saveMutedPeers,
+  type MutedPeer,
+} from "./mute-list";
 
 export type TrafficDirection = "inbound" | "outbound";
 
@@ -28,7 +35,6 @@ export type Connection = {
   real?: boolean;
   live?: boolean;
   direction?: TrafficDirection;
-  /** Burst flash for globe impact rings */
   impactAt?: number;
 };
 
@@ -83,10 +89,11 @@ type State = {
   agentActiveCount: number;
   inboundCount: number;
   outboundCount: number;
+  mutedActiveCount: number;
   events: TrafficEvent[];
   selectedId: string | null;
   soundEnabled: boolean;
-  /** Rolling samples of active count for sparkline */
+  mutedPeers: MutedPeer[];
   activityHistory: number[];
   setHome: (home: Partial<Home> & { lat: number; lon: number }) => void;
   setHomeReady: (ready: boolean) => void;
@@ -99,6 +106,12 @@ type State = {
   setSelectedId: (id: string | null) => void;
   setSoundEnabled: (on: boolean) => void;
   pushActivitySample: (n: number) => void;
+  hydrateMutes: () => void;
+  muteIp: (ip: string, meta?: { label?: string; note?: string }) => void;
+  unmuteIp: (ip: string) => void;
+  setMuteEnabled: (ip: string, enabled: boolean) => void;
+  toggleMuteIp: (ip: string, meta?: { label?: string; note?: string }) => void;
+  addMuteFromInput: (raw: string) => boolean;
   spawnConnection: (
     override?: Partial<City> & { direction?: TrafficDirection },
   ) => void;
@@ -128,6 +141,24 @@ function eventText(c: {
   return `${dir} ${c.protocol} · ${c.city}, ${c.country} · ${c.ip}${c.port ? `:${c.port}` : ""}`;
 }
 
+function recount(list: Connection[], muted: MutedPeer[]) {
+  const visible = list.filter((c) => !isIpMuted(c.ip, muted));
+  const live = visible.filter((c) => c.live !== false);
+  const mutedLive = list.filter(
+    (c) => c.live !== false && isIpMuted(c.ip, muted),
+  ).length;
+  return {
+    inboundCount: live.filter((c) => c.direction === "inbound").length,
+    outboundCount: live.filter((c) => c.direction !== "inbound").length,
+    agentActiveCount: live.length,
+    mutedActiveCount: mutedLive,
+  };
+}
+
+function persistMute(peers: MutedPeer[]) {
+  saveMutedPeers(peers);
+}
+
 export const useConnectionStore = create<State>((set, get) => ({
   home: {
     lat: DEFAULT_HOME.lat,
@@ -145,9 +176,11 @@ export const useConnectionStore = create<State>((set, get) => ({
   agentActiveCount: 0,
   inboundCount: 0,
   outboundCount: 0,
+  mutedActiveCount: 0,
   events: [],
   selectedId: null,
   soundEnabled: true,
+  mutedPeers: [],
   activityHistory: Array.from({ length: 32 }, () => 0),
 
   setHome: (home) =>
@@ -179,8 +212,100 @@ export const useConnectionStore = create<State>((set, get) => ({
       activityHistory: [...s.activityHistory.slice(-31), n],
     })),
 
+  hydrateMutes: () => {
+    const loaded = loadMutedPeers();
+    if (!loaded.length) return;
+    set((s) => ({
+      mutedPeers: loaded,
+      ...recount(s.connections, loaded),
+    }));
+  },
+
+  muteIp: (ip, meta) => {
+    const clean = normalizeIpInput(ip) ?? ip.trim();
+    if (!clean) return;
+    set((s) => {
+      const existing = s.mutedPeers.find((p) => p.ip === clean);
+      let mutedPeers: MutedPeer[];
+      if (existing) {
+        mutedPeers = s.mutedPeers.map((p) =>
+          p.ip === clean
+            ? {
+                ...p,
+                enabled: true,
+                label: meta?.label ?? p.label,
+                note: meta?.note ?? p.note,
+              }
+            : p,
+        );
+      } else {
+        mutedPeers = [
+          {
+            ip: clean,
+            enabled: true,
+            label: meta?.label,
+            note: meta?.note,
+            addedAt: Date.now(),
+          },
+          ...s.mutedPeers,
+        ];
+      }
+      persistMute(mutedPeers);
+      const selectedId =
+        s.selectedId &&
+        s.connections.find((c) => c.id === s.selectedId)?.ip === clean
+          ? null
+          : s.selectedId;
+      return {
+        mutedPeers,
+        selectedId,
+        events: s.events.filter((e) => e.ip !== clean),
+        ...recount(s.connections, mutedPeers),
+      };
+    });
+  },
+
+  unmuteIp: (ip) => {
+    set((s) => {
+      const mutedPeers = s.mutedPeers.filter((p) => p.ip !== ip);
+      persistMute(mutedPeers);
+      return { mutedPeers, ...recount(s.connections, mutedPeers) };
+    });
+  },
+
+  setMuteEnabled: (ip, enabled) => {
+    set((s) => {
+      const mutedPeers = s.mutedPeers.map((p) =>
+        p.ip === ip ? { ...p, enabled } : p,
+      );
+      persistMute(mutedPeers);
+      return {
+        mutedPeers,
+        events: enabled ? s.events.filter((e) => e.ip !== ip) : s.events,
+        ...recount(s.connections, mutedPeers),
+      };
+    });
+  },
+
+  toggleMuteIp: (ip, meta) => {
+    const { mutedPeers, muteIp, setMuteEnabled } = get();
+    const hit = mutedPeers.find((p) => p.ip === ip);
+    if (!hit) {
+      muteIp(ip, meta);
+      return;
+    }
+    setMuteEnabled(ip, !hit.enabled);
+  },
+
+  addMuteFromInput: (raw) => {
+    const ip = normalizeIpInput(raw);
+    if (!ip) return false;
+    get().muteIp(ip, { note: "manual" });
+    return true;
+  },
+
   spawnConnection: (override) => {
-    const { home, intensity, mode, soundEnabled } = get();
+    const { home, intensity, mode, soundEnabled, mutedPeers } = get();
     if (mode === "real") return;
     const city = override
       ? {
@@ -221,11 +346,11 @@ export const useConnectionStore = create<State>((set, get) => ({
       impactAt: now,
     };
 
-    if (soundEnabled) playConnectionBlip(direction, protocol);
+    const muted = isIpMuted(conn.ip, mutedPeers);
+    if (soundEnabled && !muted) playConnectionBlip(direction, protocol);
 
     set((s) => {
       const connections = [conn, ...s.connections].slice(0, 80);
-      const live = connections.filter((c) => c.live !== false);
       const ev: TrafficEvent = {
         id: conn.id,
         at: now,
@@ -239,15 +364,14 @@ export const useConnectionStore = create<State>((set, get) => ({
       return {
         connections,
         totalSeen: s.totalSeen + 1,
-        inboundCount: live.filter((c) => c.direction === "inbound").length,
-        outboundCount: live.filter((c) => c.direction !== "inbound").length,
-        events: [ev, ...s.events].slice(0, 40),
+        events: muted ? s.events : [ev, ...s.events].slice(0, 40),
+        ...recount(connections, s.mutedPeers),
       };
     });
   },
 
   upsertRealConnections: (rows) => {
-    const { home, soundEnabled } = get();
+    const { home, soundEnabled, mutedPeers } = get();
     const now = performance.now();
     const linger = 4500;
     let newCount = 0;
@@ -259,6 +383,7 @@ export const useConnectionStore = create<State>((set, get) => ({
 
       for (const row of rows) {
         const prev = byId.get(row.id);
+        const muted = isIpMuted(row.ip, mutedPeers);
         if (prev) {
           byId.set(row.id, {
             ...prev,
@@ -279,7 +404,7 @@ export const useConnectionStore = create<State>((set, get) => ({
           const isNew = !seenRealIds.has(row.id);
           if (isNew) {
             seenRealIds.add(row.id);
-            newCount += 1;
+            if (!muted) newCount += 1;
           }
           const direction = row.direction ?? "outbound";
           byId.set(row.id, {
@@ -300,9 +425,9 @@ export const useConnectionStore = create<State>((set, get) => ({
             real: true,
             live: row.live,
             direction,
-            impactAt: isNew ? now : undefined,
+            impactAt: isNew && !muted ? now : undefined,
           });
-          if (isNew) {
+          if (isNew && !muted) {
             if (soundEnabled) playConnectionBlip(direction, row.protocol);
             freshEvents.push({
               id: row.id,
@@ -336,18 +461,20 @@ export const useConnectionStore = create<State>((set, get) => ({
         return b.createdAt - a.createdAt;
       });
 
-      const live = merged.filter((c) => c.live !== false);
-      const history = [...s.activityHistory.slice(-31), live.length];
+      const sliced = merged.slice(0, 100);
+      const counts = recount(sliced, mutedPeers);
+      const history = [
+        ...s.activityHistory.slice(-31),
+        counts.agentActiveCount,
+      ];
       return {
-        connections: merged.slice(0, 100),
+        connections: sliced,
         totalSeen: s.totalSeen + newCount,
         mode: "real" as const,
         agentError: null,
-        inboundCount: live.filter((c) => c.direction === "inbound").length,
-        outboundCount: live.filter((c) => c.direction !== "inbound").length,
         events: [...freshEvents, ...s.events].slice(0, 40),
         activityHistory: history,
-        agentActiveCount: live.length,
+        ...counts,
       };
     });
   },
@@ -356,24 +483,25 @@ export const useConnectionStore = create<State>((set, get) => ({
     set((s) => {
       const next = s.connections.filter((c) => now - c.createdAt < c.ttl);
       if (next.length === s.connections.length) return s;
-      const live = next.filter((c) => c.live !== false);
       return {
         connections: next,
-        inboundCount: live.filter((c) => c.direction === "inbound").length,
-        outboundCount: live.filter((c) => c.direction !== "inbound").length,
+        ...recount(next, s.mutedPeers),
       };
     });
   },
 
   clear: () =>
-    set({
+    set((s) => ({
       connections: [],
       totalSeen: 0,
       inboundCount: 0,
       outboundCount: 0,
+      mutedActiveCount: 0,
+      agentActiveCount: 0,
       events: [],
       selectedId: null,
-    }),
+      mutedPeers: s.mutedPeers,
+    })),
 }));
 
 export function connectionLife(c: Connection, now: number): number {
@@ -388,7 +516,6 @@ export function connectionLife(c: Connection, now: number): number {
   return 1;
 }
 
-/** Weight for arc thickness by protocol drama. */
 export function protocolWeight(protocol: string): number {
   const p = (protocol || "").toUpperCase();
   if (p.includes("SSH") || p.includes("RDP")) return 1.35;
@@ -397,3 +524,6 @@ export function protocolWeight(protocol: string): number {
   if (p.includes("QUIC")) return 1.0;
   return 0.95;
 }
+
+export { isIpMuted };
+export type { MutedPeer };

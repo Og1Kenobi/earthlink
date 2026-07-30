@@ -3,12 +3,16 @@ import {
   Activity,
   ArrowDownLeft,
   ArrowUpRight,
+  Ban,
   ChevronDown,
   Crosshair,
+  Eye,
+  EyeOff,
   Globe2,
   MapPin,
   Pause,
   Play,
+  Plus,
   Radio,
   Server,
   Trash2,
@@ -18,11 +22,13 @@ import {
   X,
 } from "lucide-react";
 import {
+  isIpMuted,
   useConnectionStore,
   type Connection,
 } from "@/lib/connection-store";
 import { refreshHomeLocation } from "@/components/HomeLocator";
 import { resumeFxAudio } from "@/lib/fx-audio";
+import { pullServerMutes, syncMuteToServer } from "@/lib/server-mute";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -102,11 +108,7 @@ function matchesFilter(c: Connection, filter: ConnFilter): boolean {
 function ActivitySpark({ samples }: { samples: number[] }) {
   const max = Math.max(1, ...samples);
   return (
-    <div
-      className="flex h-8 items-end gap-px"
-      aria-hidden
-      title="Live activity"
-    >
+    <div className="flex h-8 items-end gap-px" aria-hidden>
       {samples.map((v, i) => {
         const h = Math.max(8, Math.round((v / max) * 100));
         const hot = i > samples.length - 4;
@@ -136,10 +138,12 @@ export function Hud() {
   const agentActiveCount = useConnectionStore((s) => s.agentActiveCount);
   const inboundCount = useConnectionStore((s) => s.inboundCount);
   const outboundCount = useConnectionStore((s) => s.outboundCount);
+  const mutedActiveCount = useConnectionStore((s) => s.mutedActiveCount);
   const events = useConnectionStore((s) => s.events);
   const selectedId = useConnectionStore((s) => s.selectedId);
   const soundEnabled = useConnectionStore((s) => s.soundEnabled);
   const activityHistory = useConnectionStore((s) => s.activityHistory);
+  const mutedPeers = useConnectionStore((s) => s.mutedPeers);
   const setPaused = useConnectionStore((s) => s.setPaused);
   const setIntensity = useConnectionStore((s) => s.setIntensity);
   const setMode = useConnectionStore((s) => s.setMode);
@@ -148,32 +152,59 @@ export function Hud() {
   const setHome = useConnectionStore((s) => s.setHome);
   const setSelectedId = useConnectionStore((s) => s.setSelectedId);
   const setSoundEnabled = useConnectionStore((s) => s.setSoundEnabled);
+  const hydrateMutes = useConnectionStore((s) => s.hydrateMutes);
+  const muteIp = useConnectionStore((s) => s.muteIp);
+  const unmuteIp = useConnectionStore((s) => s.unmuteIp);
+  const setMuteEnabled = useConnectionStore((s) => s.setMuteEnabled);
+  const addMuteFromInput = useConnectionStore((s) => s.addMuteFromInput);
 
   const [now, setNow] = useState(() => performance.now());
   const [locating, setLocating] = useState(false);
   const [connFilter, setConnFilter] = useState<ConnFilter>("all");
+  const [muteInput, setMuteInput] = useState("");
+  const [showMuted, setShowMuted] = useState(false);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(performance.now()), 200);
     return () => window.clearInterval(id);
   }, []);
 
-  const activeCount = connections.filter((c) => c.live !== false).length;
+  useEffect(() => {
+    hydrateMutes();
+    let cancelled = false;
+    (async () => {
+      const ips = await pullServerMutes();
+      if (cancelled || !ips.length) return;
+      for (const ip of ips) {
+        muteIp(ip, { note: "server" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateMutes, muteIp]);
+
+  const unmutedConnections = useMemo(
+    () => connections.filter((c) => !isIpMuted(c.ip, mutedPeers)),
+    [connections, mutedPeers],
+  );
+
+  const activeCount = unmutedConnections.filter((c) => c.live !== false).length;
 
   const topCountries = useMemo(() => {
     const map = new Map<string, number>();
-    for (const c of connections) {
+    for (const c of unmutedConnections) {
       if (c.live === false) continue;
       map.set(c.country, (map.get(c.country) ?? 0) + 1);
     }
     return [...map.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
-  }, [connections]);
+  }, [unmutedConnections]);
 
   const topProtocols = useMemo(() => {
     const map = new Map<string, number>();
-    for (const c of connections) {
+    for (const c of unmutedConnections) {
       if (c.live === false) continue;
       const p = c.protocol || "TCP";
       map.set(p, (map.get(p) ?? 0) + 1);
@@ -181,13 +212,13 @@ export function Hud() {
     return [...map.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
-  }, [connections]);
+  }, [unmutedConnections]);
 
   const filterOptions = useMemo(() => {
     const seen = new Set(STATIC_FILTERS.map((f) => f.value));
     const opts = [...STATIC_FILTERS];
     const protos = new Map<string, number>();
-    for (const c of connections) {
+    for (const c of unmutedConnections) {
       const p = (c.protocol || "TCP").trim();
       if (!p) continue;
       protos.set(p, (protos.get(p) ?? 0) + 1);
@@ -210,17 +241,33 @@ export function Hud() {
       opts.push({ value, label: `${p} (${n})` });
     }
     return opts;
-  }, [connections]);
+  }, [unmutedConnections]);
 
   const filteredConnections = useMemo(
-    () => connections.filter((c) => matchesFilter(c, connFilter)),
-    [connections, connFilter],
+    () => unmutedConnections.filter((c) => matchesFilter(c, connFilter)),
+    [unmutedConnections, connFilter],
   );
 
   const selected = useMemo(
-    () => connections.find((c) => c.id === selectedId) ?? null,
-    [connections, selectedId],
+    () => unmutedConnections.find((c) => c.id === selectedId) ?? null,
+    [unmutedConnections, selectedId],
   );
+
+  const onMute = (ip: string, label?: string) => {
+    muteIp(ip, { label });
+    void syncMuteToServer("mute", ip);
+    setShowMuted(true);
+  };
+
+  const onUnmute = (ip: string) => {
+    unmuteIp(ip);
+    void syncMuteToServer("unmute", ip);
+  };
+
+  const onToggleMuteEnabled = (ip: string, enabled: boolean) => {
+    setMuteEnabled(ip, enabled);
+    void syncMuteToServer(enabled ? "mute" : "unmute", ip);
+  };
 
   const onRelocate = async () => {
     setLocating(true);
@@ -240,9 +287,10 @@ export function Hud() {
         ? "border-warn/40 bg-warn/10 text-warn"
         : "border-border bg-surface-elevated text-muted";
 
+  const enabledMutes = mutedPeers.filter((p) => p.enabled).length;
+
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-3 sm:p-5">
-      {/* Cinematic overlays */}
       <div className="vignette absolute inset-0" />
       <div className="scanlines absolute inset-0" />
 
@@ -263,20 +311,17 @@ export function Hud() {
             </span>
           </div>
           <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted sm:text-sm">
-            {mode === "real"
-              ? "NOC globe · TCP · UDP/DNS · ping · click a row to focus the arc."
-              : mode === "connecting"
-                ? "Linking traffic agent…"
-                : "Demo mode — install on your server for real sockets."}
+            Mute noisy peers (DNS forwarders, CDNs) with the ban icon — toggle
+            them back on anytime.
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-4">
             <div className="flex gap-3 text-[10px] font-mono uppercase tracking-wide">
               <span className="inline-flex items-center gap-1 text-primary">
-                <span className="size-1.5 rounded-full bg-primary shadow-[0_0_8px_var(--color-primary)]" />
+                <span className="size-1.5 rounded-full bg-primary" />
                 In
               </span>
               <span className="inline-flex items-center gap-1 text-warn">
-                <span className="size-1.5 rounded-full bg-warn shadow-[0_0_8px_var(--color-warn)]" />
+                <span className="size-1.5 rounded-full bg-warn" />
                 Out
               </span>
             </div>
@@ -287,13 +332,27 @@ export function Hud() {
         <div className="panel-glass flex flex-wrap items-center gap-2 rounded-xl px-3 py-2">
           <button
             type="button"
+            onClick={() => setShowMuted((v) => !v)}
+            className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm transition ${
+              showMuted || enabledMutes > 0
+                ? "border-warn/40 bg-warn/10 text-warn"
+                : "border-border bg-surface-elevated text-fg hover:border-warn/40 hover:text-warn"
+            }`}
+            title="Muted IPs"
+          >
+            <Ban className="size-4" />
+            <span className="hidden font-mono text-xs sm:inline">
+              {enabledMutes || mutedPeers.length}
+            </span>
+          </button>
+          <button
+            type="button"
             onClick={() => {
               resumeFxAudio();
               setSoundEnabled(!soundEnabled);
             }}
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 text-sm text-fg transition hover:border-accent/40 hover:text-accent"
-            aria-label={soundEnabled ? "Mute" : "Unmute"}
-            title={soundEnabled ? "Mute blips" : "Enable blips"}
+            aria-label={soundEnabled ? "Mute sound" : "Unmute sound"}
           >
             {soundEnabled ? (
               <Volume2 className="size-4" />
@@ -305,11 +364,9 @@ export function Hud() {
             type="button"
             onClick={() => setPaused(!paused)}
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 text-sm text-fg transition hover:border-primary/40 hover:text-primary"
-            aria-label={paused ? "Resume" : "Pause"}
             disabled={mode === "real"}
           >
             {paused ? <Play className="size-4" /> : <Pause className="size-4" />}
-            <span className="hidden sm:inline">{paused ? "Resume" : "Pause"}</span>
           </button>
           {mode !== "real" && (
             <button
@@ -321,7 +378,6 @@ export function Hud() {
               className="inline-flex h-10 items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 text-sm text-primary transition hover:bg-primary/20"
             >
               <Zap className="size-4" />
-              <span className="hidden sm:inline">Pulse</span>
             </button>
           )}
           {mode === "demo" && (
@@ -331,17 +387,15 @@ export function Hud() {
                 setMode("connecting");
                 window.location.reload();
               }}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 text-sm text-accent transition hover:bg-accent/20"
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 text-sm text-accent"
             >
               <Server className="size-4" />
-              <span className="hidden sm:inline">Retry</span>
             </button>
           )}
           <button
             type="button"
             onClick={() => clear()}
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 text-sm text-muted transition hover:border-danger/40 hover:text-danger"
-            aria-label="Clear"
           >
             <Trash2 className="size-4" />
           </button>
@@ -385,6 +439,14 @@ export function Hud() {
                 </p>
               </div>
             </div>
+            {(enabledMutes > 0 || mutedActiveCount > 0) && (
+              <p className="mt-2 font-mono text-[10px] text-faint">
+                {enabledMutes} IP{enabledMutes === 1 ? "" : "s"} muted
+                {mutedActiveCount > 0
+                  ? ` · ${mutedActiveCount} hidden live`
+                  : ""}
+              </p>
+            )}
             {mode !== "real" && (
               <div className="mt-3">
                 <p className="text-[10px] uppercase tracking-wider text-faint">
@@ -487,6 +549,107 @@ export function Hud() {
             </p>
           </div>
 
+          {(showMuted || mutedPeers.length > 0) && (
+            <div className="panel-glass rounded-xl p-3 sm:p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-faint">
+                  <Ban className="size-3.5 text-warn" />
+                  Muted IPs
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMuted(false)}
+                  className="rounded p-1 text-muted hover:text-fg"
+                  aria-label="Hide muted panel"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+              <form
+                className="mt-2 flex gap-1.5"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const raw = muteInput.trim();
+                  if (addMuteFromInput(raw)) {
+                    void syncMuteToServer("mute", raw);
+                    setMuteInput("");
+                    setShowMuted(true);
+                  }
+                }}
+              >
+                <input
+                  value={muteInput}
+                  onChange={(e) => setMuteInput(e.target.value)}
+                  placeholder="8.8.8.8"
+                  className="h-8 min-w-0 flex-1 rounded-md border border-border bg-surface-elevated px-2 font-mono text-[11px] text-fg outline-none placeholder:text-faint focus:border-warn/50"
+                />
+                <button
+                  type="submit"
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-warn/30 bg-warn/10 px-2 text-[11px] text-warn"
+                  title="Mute IP"
+                >
+                  <Plus className="size-3.5" />
+                </button>
+              </form>
+              <p className="mt-1.5 text-[10px] text-faint">
+                e.g. DNS forwarders 8.8.8.8 · 8.8.4.4
+              </p>
+              {mutedPeers.length === 0 ? (
+                <p className="mt-2 text-xs text-muted">No muted peers yet.</p>
+              ) : (
+                <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                  {mutedPeers.map((p) => (
+                    <li
+                      key={p.ip}
+                      className="flex items-center gap-1.5 rounded-md border border-border bg-surface/60 px-2 py-1.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onToggleMuteEnabled(p.ip, !p.enabled)}
+                        className={`shrink-0 rounded p-0.5 ${
+                          p.enabled ? "text-warn" : "text-faint"
+                        }`}
+                        title={
+                          p.enabled
+                            ? "Turn hide off (show on globe again)"
+                            : "Turn hide on"
+                        }
+                      >
+                        {p.enabled ? (
+                          <EyeOff className="size-3.5" />
+                        ) : (
+                          <Eye className="size-3.5" />
+                        )}
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className={`truncate font-mono text-[11px] ${
+                            p.enabled ? "text-fg" : "text-faint line-through"
+                          }`}
+                        >
+                          {p.ip}
+                        </p>
+                        {p.label && (
+                          <p className="truncate text-[10px] text-faint">
+                            {p.label}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onUnmute(p.ip)}
+                        className="shrink-0 rounded p-0.5 text-muted hover:text-danger"
+                        title="Remove from mute list"
+                      >
+                        <Trash2 className="size-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {selected && (
             <div className="panel-glass panel-glow-in event-flash rounded-xl p-3 sm:p-4">
               <div className="flex items-start justify-between gap-2">
@@ -497,7 +660,6 @@ export function Hud() {
                   type="button"
                   onClick={() => setSelectedId(null)}
                   className="rounded-md p-1 text-muted hover:text-fg"
-                  aria-label="Close"
                 >
                   <X className="size-3.5" />
                 </button>
@@ -515,6 +677,19 @@ export function Hud() {
               <p className="mt-1 text-[11px] text-faint">
                 {selected.distanceKm.toLocaleString()} km from home
               </p>
+              <button
+                type="button"
+                onClick={() =>
+                  onMute(
+                    selected.ip,
+                    `${selected.city}, ${selected.country} · ${selected.protocol}`,
+                  )
+                }
+                className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-warn/35 bg-warn/10 text-xs text-warn transition hover:bg-warn/20"
+              >
+                <Ban className="size-3.5" />
+                Mute this IP
+              </button>
             </div>
           )}
         </aside>
@@ -529,7 +704,9 @@ export function Hud() {
                 </div>
                 <span className="font-mono text-[10px] tabular-nums text-muted">
                   {filteredConnections.length}
-                  {connFilter !== "all" ? ` / ${connections.length}` : ""}
+                  {connFilter !== "all"
+                    ? ` / ${unmutedConnections.length}`
+                    : ""}
                 </span>
               </div>
               <label className="relative block">
@@ -552,10 +729,12 @@ export function Hud() {
               </label>
             </div>
             <ul className="min-h-0 flex-1 space-y-0 overflow-y-auto overscroll-contain px-2 py-2">
-              {connections.length === 0 ? (
+              {unmutedConnections.length === 0 ? (
                 <li className="px-2 py-6 text-center text-xs text-muted">
                   {mode === "real"
-                    ? "Waiting for public remotes…"
+                    ? enabledMutes > 0
+                      ? "All visible peers muted — open Muted IPs to re-enable."
+                      : "Waiting for public remotes…"
                     : "Waiting for traffic…"}
                 </li>
               ) : filteredConnections.length === 0 ? (
@@ -576,14 +755,14 @@ export function Hud() {
                   const inbound = c.direction === "inbound";
                   const isSel = c.id === selectedId;
                   return (
-                    <li key={c.id}>
+                    <li key={c.id} className="group relative">
                       <button
                         type="button"
                         onClick={() => {
                           resumeFxAudio();
                           setSelectedId(isSel ? null : c.id);
                         }}
-                        className={`w-full rounded-lg px-2.5 py-2 text-left transition hover:bg-surface-elevated/80 ${
+                        className={`w-full rounded-lg px-2.5 py-2 pr-9 text-left transition hover:bg-surface-elevated/80 ${
                           isSel ? "conn-row-selected" : ""
                         }`}
                       >
@@ -622,6 +801,20 @@ export function Hud() {
                           {!c.real && <span>{formatBytes(c.bytes)}</span>}
                         </div>
                       </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMute(
+                            c.ip,
+                            `${c.city}, ${c.country} · ${c.protocol}`,
+                          );
+                        }}
+                        className="absolute right-1.5 top-2 rounded-md border border-transparent p-1.5 text-faint opacity-70 transition hover:border-warn/40 hover:bg-warn/10 hover:text-warn group-hover:opacity-100"
+                        title={`Mute ${c.ip}`}
+                      >
+                        <Ban className="size-3.5" />
+                      </button>
                     </li>
                   );
                 })
@@ -631,7 +824,6 @@ export function Hud() {
         </aside>
       </div>
 
-      {/* Event ticker */}
       <div className="pointer-events-auto relative z-10">
         <div className="panel-glass ticker-track overflow-hidden rounded-xl px-3 py-2">
           <div className="flex items-center gap-3">
@@ -664,6 +856,16 @@ export function Hud() {
                         {" "}
                         · {ev.city}, {ev.country}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onMute(ev.ip, `${ev.city} · ${ev.protocol}`)
+                        }
+                        className="ml-1.5 inline text-faint hover:text-warn"
+                        title={`Mute ${ev.ip}`}
+                      >
+                        ×
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -672,7 +874,6 @@ export function Hud() {
           </div>
         </div>
 
-        {/* Mobile strip */}
         <div className="panel-glass mt-2 rounded-xl md:hidden">
           <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
             <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-faint">
@@ -694,28 +895,26 @@ export function Hud() {
           <ul className="flex gap-2 overflow-x-auto px-2 py-2">
             {filteredConnections.slice(0, 8).map((c) => (
               <li key={c.id} className="min-w-[9.5rem] shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(c.id === selectedId ? null : c.id)}
-                  className={`w-full rounded-lg border px-2.5 py-2 text-left ${
-                    c.id === selectedId
-                      ? "border-primary/40 bg-primary/10"
-                      : "border-border bg-surface"
-                  }`}
-                >
+                <div className="rounded-lg border border-border bg-surface px-2.5 py-2">
                   <p className="truncate text-xs font-medium text-fg">
                     {c.city}, {c.country}
                   </p>
-                  <p className="font-mono text-[10px] text-muted">{c.protocol}</p>
-                </button>
+                  <p className="font-mono text-[10px] text-muted">{c.ip}</p>
+                  <button
+                    type="button"
+                    onClick={() => onMute(c.ip, c.city)}
+                    className="mt-1 text-[10px] text-warn"
+                  >
+                    Mute
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         </div>
 
         <p className="pointer-events-none mt-2 hidden text-center text-[11px] text-faint sm:block">
-          Drag to orbit · Scroll to zoom · Click a connection to focus · Sound
-          toggle for blips
+          Ban icon mutes an IP · Eye toggle shows/hides again · Survives refresh
         </p>
       </div>
     </div>
