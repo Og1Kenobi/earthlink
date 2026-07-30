@@ -386,7 +386,34 @@ export function Hud() {
               </span>
             )}
           </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-muted">
+            <span className="inline-flex min-w-0 max-w-[14rem] items-center gap-1 truncate sm:max-w-xs">
+              <MapPin className="size-3 shrink-0 text-accent" />
+              <span className="truncate text-fg">
+                {homeReady || home.source !== "default"
+                  ? home.label
+                  : "Locating…"}
+              </span>
+              <span className="shrink-0 text-faint">
+                {home.lat.toFixed(1)}°, {home.lon.toFixed(1)}°
+                {home.ip ? ` · ${home.ip}` : ""}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={onRelocate}
+              disabled={locating}
+              title="Re-detect home location"
+              className="tip tip-below inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border bg-surface-elevated px-1.5 text-[10px] text-muted hover:border-border-strong hover:text-fg disabled:opacity-50"
+            >
+              <Crosshair
+                className={`size-3 ${locating ? "animate-spin" : ""}`}
+              />
+              {locating ? "…" : "Locate"}
+            </button>
+          </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
+
             <ActivitySpark samples={activityHistory} />
             <div className="flex flex-wrap gap-1">
               {PRESETS.map((p) => (
@@ -535,8 +562,9 @@ export function Hud() {
       </header>
 
       <div className="pointer-events-none relative flex min-h-0 flex-1 items-stretch justify-between gap-3 overflow-hidden py-2">
-        <aside className="pointer-events-auto flex w-[min(100%,15.75rem)] shrink-0 flex-col gap-2 self-stretch overflow-y-auto overscroll-contain [scrollbar-width:thin]">
-          <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
+        <aside className="pointer-events-auto flex w-[min(100%,15.75rem)] shrink-0 flex-col gap-1.5 self-stretch overflow-hidden">
+
+          <div className="panel-glass shrink-0 rounded-xl px-3 py-2">
             <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-faint">
               <Activity className="size-3.5 text-accent" />
               Traffic
@@ -610,10 +638,10 @@ export function Hud() {
                 />
               </span>
             </button>
-            <p className="mt-1 font-mono text-[9px] leading-snug text-faint">
+            <p className="sr-only">
               {includePrivate
-                ? "LAN peers plotted near home (10.x / 192.168.x / …)"
-                : "Only public remotes (default)"}
+                ? "LAN peers plotted near home"
+                : "Only public remotes"}
             </p>
 
             {agents.length > 0 && (
@@ -632,7 +660,7 @@ export function Hud() {
                   )}
                 </div>
                 <ul className="mt-1 space-y-0.5">
-                  {agents.slice(0, 8).map((a) => {
+                  {agents.slice(0, 6).map((a) => {
                     const active = selectedAgentId === a.hostId;
                     return (
                       <li key={a.hostId}>
@@ -678,7 +706,7 @@ export function Hud() {
                   })}
                 </ul>
                 {selectedAgentId && (
-                  <p className="mt-1 font-mono text-[9px] text-accent">
+                  <p className="mt-0.5 truncate font-mono text-[9px] text-accent">
                     Filter: {selectedAgentId}
                   </p>
                 )}
@@ -734,11 +762,11 @@ export function Hud() {
             )}
           </div>
 
-          <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
+          <div className="panel-glass shrink-0 rounded-xl px-3 py-2">
             <p className="text-[10px] font-medium uppercase tracking-wider text-faint">
               Top talkers
             </p>
-            <ul className="mt-1.5 space-y-1">
+            <ul className="mt-1 space-y-1">
               {topTalkers.length === 0 ? (
                 <li className="text-[11px] text-muted">Waiting for rates…</li>
               ) : (
@@ -772,7 +800,7 @@ export function Hud() {
             </ul>
           </div>
 
-          <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
+          <div className="panel-glass min-h-0 shrink rounded-xl px-3 py-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-faint">
                 <Shield className="size-3.5 text-danger" />
@@ -815,37 +843,8 @@ export function Hud() {
             </ul>
           </div>
 
-          <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-faint">
-                <MapPin className="size-3.5 text-accent" />
-                Home
-              </div>
-              <button
-                type="button"
-                onClick={onRelocate}
-                disabled={locating || mode === "real"}
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-surface-elevated px-1.5 text-[10px] text-muted disabled:opacity-50"
-              >
-                <Crosshair
-                  className={`size-3 ${locating ? "animate-spin" : ""}`}
-                />
-                {locating ? "…" : "Locate"}
-              </button>
-            </div>
-            <p className="mt-1 truncate text-sm font-medium text-fg">
-              {homeReady || home.source !== "default"
-                ? home.label
-                : "Locating…"}
-            </p>
-            <p className="font-mono text-[10px] text-muted">
-              {home.lat.toFixed(2)}°, {home.lon.toFixed(2)}°
-              {home.ip ? ` · ${home.ip}` : ""}
-            </p>
-          </div>
-
           {(showMuted || mutedPeers.length > 0) && (
-            <div className="panel-glass shrink-0 rounded-xl px-3 py-2.5">
+            <div className="panel-glass min-h-0 shrink rounded-xl px-3 py-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-faint">
                   <Ban className="size-3.5 text-warn" />
@@ -879,7 +878,7 @@ export function Hud() {
                   <Plus className="size-3.5" />
                 </button>
               </form>
-              <ul className="mt-1.5 max-h-16 space-y-1 overflow-y-auto">
+              <ul className="mt-1.5 max-h-14 space-y-1 overflow-y-auto [scrollbar-width:thin]">
                 {mutedPeers.length === 0 ? (
                   <li className="text-[11px] text-muted">None muted</li>
                 ) : (
