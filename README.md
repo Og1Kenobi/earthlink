@@ -44,7 +44,7 @@ Kiosk mode strips chrome for wall / TV use.
 - **Alerts** — new country, SSH from new /24
 - **Marquee feed** — auto-scrolls; hover to pause
 - **Tooltips** on toolbar, presets, and controls
-- **Top talkers** · access-log correlate · iface filter
+- **Top talkers** · access-log correlation · iface filter
 
 ---
 
@@ -58,7 +58,7 @@ npm run build
 HOST=0.0.0.0 PORT=8080 npm start
 ```
 
-Open `http://YOUR_SERVER:8080` — badge should read **LIVE**.
+Open `http://YOUR_SERVER:8080` — the badge should read **LIVE**.
 
 Full install: **[INSTALL.md](./INSTALL.md)**
 

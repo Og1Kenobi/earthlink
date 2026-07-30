@@ -615,7 +615,8 @@ export function Hud() {
             {(enabledMutes > 0 || mutedActiveCount > 0) && (
               <p className="mt-1.5 font-mono text-[10px] text-faint">
                 {enabledMutes} muted
-                {mutedActiveCount ? ` · ${mutedActiveCount} hidden` : ""}
+                {mutedActiveCount ? ` · ${mutedActiveCount} muted live` : ""}
+
               </p>
             )}
             {topCountries.length > 0 && (

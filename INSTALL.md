@@ -1,13 +1,14 @@
 # Earthlink — install on your server
 
-Shows **real** established TCP connections (inbound + outbound) on the host as dots + arcs on a live Earth globe.
+Shows **real** host traffic on a live political globe: TCP, UDP, DNS, and ping
+(when conntrack is available). Peers appear as dots + arcs to your home pin.
 
 - **Green arcs** = inbound (remote → your server)
 - **Amber arcs** = outbound (your server → remote)
 
 ## Requirements
 
-- Linux (uses `/proc/net/tcp`; falls back to `ss` / `netstat`)
+- Linux (reads `/proc/net/tcp` / UDP; falls back to `ss` / `netstat` / `conntrack`)
 - Node.js **20+** (22 recommended)
 - Outbound HTTP for IP geolocation
 - Port **8080** free (or set `PORT`)
@@ -21,7 +22,7 @@ npm run build
 HOST=0.0.0.0 PORT=8080 npm start
 ```
 
-Open: `http://YOUR_SERVER_IP:8080` — badge should read **LIVE** / **REAL**.
+Open: `http://YOUR_SERVER_IP:8080` — the badge should read **LIVE**.
 
 ## systemd
 
@@ -44,6 +45,9 @@ Environment=PORT=8080
 # Environment=EARTHLINK_INCLUDE_PRIVATE=1
 # Environment=EARTHLINK_DIRECTIONS=both
 # Environment=EARTHLINK_MUTE_IPS=8.8.8.8,8.8.4.4
+# Environment=EARTHLINK_ACCESS_LOG=/var/log/nginx/access.log
+# Environment=EARTHLINK_IFACES=eth0
+# Environment=EARTHLINK_HOST_ID=edge-1
 ExecStart=/usr/bin/node server/traffic-server.mjs
 Restart=on-failure
 RestartSec=3
@@ -69,9 +73,12 @@ sudo systemctl enable --now earthlink
 | `EARTHLINK_HOME_LABEL` | — | Home label |
 | `EARTHLINK_POLL_MS` | `1500` | Socket poll interval |
 | `EARTHLINK_LINGER_MS` | `4500` | Fade after close |
-| `EARTHLINK_INCLUDE_PRIVATE` | off | Set `1` to show LAN peers |
+| `EARTHLINK_INCLUDE_PRIVATE` | off | Set `1` to show LAN peers (or use UI toggle) |
 | `EARTHLINK_DIRECTIONS` | `both` | `both`, `inbound`, or `outbound` |
 | `EARTHLINK_MUTE_IPS` | — | Comma-separated IPs to hide |
+| `EARTHLINK_ACCESS_LOG` | — | Nginx/Caddy access log for HTTP path labels |
+| `EARTHLINK_IFACES` | — | Restrict to interfaces (e.g. `eth0,wg0`) |
+| `EARTHLINK_HOST_ID` | hostname | Label when multi-host later |
 
 ## Direction detection
 
@@ -93,4 +100,24 @@ sudo apt install -y conntrack
 echo 'YOUR_USER ALL=(root) NOPASSWD: /usr/sbin/conntrack' | sudo tee /etc/sudoers.d/earthlink-conntrack
 sudo chmod 440 /etc/sudoers.d/earthlink-conntrack
 sudo -n /usr/sbin/conntrack -L | head
+```
+
+## UI tips
+
+| Control | Purpose |
+|---|---|
+| **Internal IPs** | Show private/LAN peers near home |
+| **Mute** | Hide noisy IPs (DNS forwarders, etc.) |
+| **Spin** Off → Turbo | Globe rotation speed |
+| **Feed** (bottom) | Auto-scrolls; hover to pause |
+| Hover any toolbar icon | Tooltip |
+
+## Updating
+
+```bash
+cd /opt/earthlink
+git pull origin main
+npm install
+npm run build
+sudo systemctl restart earthlink
 ```
