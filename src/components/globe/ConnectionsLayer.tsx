@@ -155,7 +155,8 @@ function ConnectionArc({
     const selBoost = selected ? 1.1 : 1;
 
     if (rootRef.current) {
-      rootRef.current.visible = life > 0.03;
+      // Keep mounted through full fade; only hide at true zero
+      rootRef.current.visible = life > 0.001;
     }
 
     const applyOpacity = (group: THREE.Group | null, opacity: number) => {
@@ -356,14 +357,17 @@ function HomeBeacon({ lat, lon }: { lat: number; lon: number }) {
   );
 }
 
-function useVisibleConnections(list: Connection[], max = 48) {
+function useVisibleConnections(list: Connection[], max = 64) {
   return useMemo(() => {
     const live = list.filter((c) => c.live !== false);
-    const dead = list.filter((c) => c.live === false);
-    const byRate = [...live].sort(
-      (a, b) => (b.bytesPerSec || 0) - (a.bytesPerSec || 0),
-    );
-    return [...byRate, ...dead].slice(0, max);
+    const dying = list.filter((c) => c.live === false);
+    // Always leave room so fading arcs can finish their ease-out
+    const dyingKeep = dying.slice(0, Math.min(24, Math.floor(max * 0.4)));
+    const liveKeep = live
+      .slice()
+      .sort((a, b) => (b.bytesPerSec || 0) - (a.bytesPerSec || 0))
+      .slice(0, max - dyingKeep.length);
+    return [...liveKeep, ...dyingKeep];
   }, [list, max]);
 }
 

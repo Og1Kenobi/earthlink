@@ -728,7 +728,7 @@ export const useConnectionStore = create<State>((set, get) => ({
       seenSshSubnets,
     } = get();
     const now = performance.now();
-    const linger = 7000;
+    const linger = 8000;
 
     let newCount = 0;
     const freshEvents: TrafficEvent[] = [];
@@ -747,8 +747,8 @@ export const useConnectionStore = create<State>((set, get) => ({
         if (prev) {
           const wasLive = prev.live !== false;
           const nowLive = row.live !== false;
-          // When a real socket closes, restart the fade clock so arcs linger properly
           const dying = wasLive && !nowLive;
+          const reviving = !wasLive && nowLive;
           byId.set(row.id, {
             ...prev,
             protocol: row.protocol,
@@ -757,7 +757,7 @@ export const useConnectionStore = create<State>((set, get) => ({
             country: row.country,
             lat: row.lat,
             lon: row.lon,
-            live: row.live,
+            live: nowLive,
             real: true,
             direction: row.direction ?? prev.direction ?? "outbound",
             org: row.org ?? prev.org,
@@ -770,20 +770,20 @@ export const useConnectionStore = create<State>((set, get) => ({
             httpMethod: row.httpMethod ?? prev.httpMethod,
             bytes: row.bytes ?? prev.bytes,
             bytesPerSec: row.bytesPerSec ?? prev.bytesPerSec,
-            hostId: row.hostId ?? prev.hostId,
+            hostId:
+              row.hostId ??
+              prev.hostId ??
+              (row.id?.includes("|") ? row.id.split("|")[0] : undefined),
             os: row.os ?? prev.os,
             transport: row.transport ?? prev.transport,
             isPrivate: row.isPrivate ?? prev.isPrivate,
-            // derive hostId from id prefix if still missing
-            ...(!(row.hostId ?? prev.hostId) && row.id?.includes("|")
-              ? { hostId: row.id.split("|")[0] }
-              : {}),
-            createdAt: dying ? now : prev.createdAt,
+            // Restart fade clock only when a live socket first dies
+            createdAt: dying ? now : reviving ? now : prev.createdAt,
             ttl: nowLive
-              ? Math.max(prev.ttl, now - (dying ? now : prev.createdAt) + 120_000)
+              ? 120_000
               : dying
                 ? (row.lingerMs ?? linger)
-                : Math.max(prev.ttl, row.lingerMs ?? linger),
+                : Math.max(4000, prev.ttl),
           });
         } else {
           const isNew = !seenRealIds.has(row.id);
@@ -888,18 +888,34 @@ export const useConnectionStore = create<State>((set, get) => ({
         }
       }
 
+      // Vanished from feed without live:false — start soft fade (no hard pop)
+      for (const [id, prev] of byId) {
+        if (nextIds.has(id)) continue;
+        if (!prev.real) continue;
+        if (prev.live !== false) {
+          byId.set(id, {
+            ...prev,
+            live: false,
+            createdAt: now,
+            ttl: linger,
+          });
+        }
+      }
+
       const merged = [...byId.values()].filter((c) => {
         if (!c.real) return false;
-        if (nextIds.has(c.id)) return true;
+        if (c.live !== false) return true;
         return now - c.createdAt < c.ttl;
       });
 
-      merged.sort((a, b) => {
-        if ((a.live ? 1 : 0) !== (b.live ? 1 : 0)) return a.live ? -1 : 1;
-        return b.createdAt - a.createdAt;
-      });
-
-      const sliced = merged.slice(0, 120);
+      // Keep fading arcs so they can ease out (don't drop them for live-only cap)
+      const liveOnes = merged
+        .filter((c) => c.live !== false)
+        .sort((a, b) => b.createdAt - a.createdAt);
+      const dyingOnes = merged
+        .filter((c) => c.live === false)
+        .sort((a, b) => b.createdAt - a.createdAt);
+      const sliced = [...liveOnes.slice(0, 90), ...dyingOnes.slice(0, 30)];
       const counts = recount(sliced, mutedPeers);
       const history = [
         ...s.activityHistory.slice(-31),
@@ -927,7 +943,11 @@ export const useConnectionStore = create<State>((set, get) => ({
 
   tick: (now) => {
     set((s) => {
-      const next = s.connections.filter((c) => now - c.createdAt < c.ttl);
+      // Live sockets never expire by age — only dying ones fade out via ttl
+      const next = s.connections.filter((c) => {
+        if (c.live !== false) return true;
+        return now - c.createdAt < c.ttl;
+      });
       const trails = s.trails.filter((t) => now - t.born < t.ttl);
       if (
         next.length === s.connections.length &&
@@ -963,27 +983,21 @@ export const useConnectionStore = create<State>((set, get) => ({
 export function connectionLife(c: Connection, now: number): number {
   const age = Math.max(0, now - c.createdAt);
 
-  // Live real sockets stay fully visible (brief fade-in only)
+  // Live real sockets: brief fade-in, then full
   if (c.real && c.live !== false) {
-    const fadeIn = 350;
+    const fadeIn = 400;
     if (age < fadeIn) return age / fadeIn;
     return 1;
   }
 
-  // Dying / demo: fade based on remaining time, not absolute age
-  // (age/ttl is wrong for long-lived real sockets that then close)
-  const remaining = c.ttl - age;
-  if (remaining <= 0) return 0;
-  // longer, softer fade-out so arcs ease out instead of popping
-  const fadeOut = Math.min(4500, Math.max(1200, c.ttl * 0.55));
-  if (remaining < fadeOut) {
-    // ease-out curve
-    const t = remaining / fadeOut;
-    return t * t;
-  }
-  // short fade-in for demo
-  if (!c.real && age < 200) return age / 200;
-  return 1;
+  // Dying / closed: entire ttl is a smooth fade-out (never hard-pop)
+  const duration = Math.max(c.ttl || 1, 1);
+  const tNorm = age / duration;
+  if (tNorm >= 1) return 0;
+  if (tNorm <= 0) return 1;
+  // smoothstep ease-out
+  const u = 1 - tNorm;
+  return u * u * (3 - 2 * u);
 }
 
 export { isIpMuted };
