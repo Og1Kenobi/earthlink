@@ -24,23 +24,19 @@ export function createArcPoints(
   start: THREE.Vector3,
   end: THREE.Vector3,
   radius: number,
-  segments = 64,
+  segments = 80,
 ): THREE.Vector3[] {
   const points: THREE.Vector3[] = [];
   const startN = start.clone().normalize();
   const endN = end.clone().normalize();
 
-  // Spherical linear interpolation for a true great-circle path
   let omega = startN.angleTo(endN);
-  if (omega < 1e-4) {
-    // Nearly same point — tiny loop so something still draws
-    omega = 0.02;
-  }
+  if (omega < 1e-4) omega = 0.02;
 
-  // Base sits just above the sphere so endpoints don't clip
-  const base = radius * 1.012;
-  // Low fly: peak lift is modest (was nearly invisible at 2.5%)
-  const altitude = radius * (0.045 + Math.min(omega / Math.PI, 1) * 0.11);
+  // Sit above the textured sphere so the path never sinks into land
+  const base = radius * 1.02;
+  // Low fly — short hops ~6% of radius peak, long hauls up to ~18%
+  const altitude = radius * (0.06 + Math.min(omega / Math.PI, 1) * 0.12);
 
   const sinOmega = Math.sin(omega);
 
@@ -52,10 +48,12 @@ export function createArcPoints(
     } else {
       const a = Math.sin((1 - t) * omega) / sinOmega;
       const b = Math.sin(t * omega) / sinOmega;
-      p = startN.clone().multiplyScalar(a).add(endN.clone().multiplyScalar(b));
-      p.normalize();
+      p = startN
+        .clone()
+        .multiplyScalar(a)
+        .add(endN.clone().multiplyScalar(b))
+        .normalize();
     }
-    // Smooth lift that peaks mid-arc (low trajectory)
     const lift = Math.sin(t * Math.PI) * altitude;
     p.multiplyScalar(base + lift);
     points.push(p);
