@@ -50,7 +50,7 @@ Short-lived flows need **conntrack**:
 
 ```bash
 sudo apt install -y conntrack
-# passwordless for the app user (example):
+# passwordless for the app user (replace YOUR_USER):
 echo 'YOUR_USER ALL=(root) NOPASSWD: /usr/sbin/conntrack' | sudo tee /etc/sudoers.d/earthlink-conntrack
 sudo chmod 440 /etc/sudoers.d/earthlink-conntrack
 ```

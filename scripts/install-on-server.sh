@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copy/run on the target host (e.g. 10.11.12.62)
+# Copy/run on the target host
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
