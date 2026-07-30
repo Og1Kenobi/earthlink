@@ -44,7 +44,6 @@ const PORT_PROTO = {
   27017: "Mongo",
 };
 
-/** UDP-specific labels when port alone is ambiguous */
 const UDP_PORT_PROTO = {
   53: "DNS",
   67: "DHCP",
@@ -58,8 +57,6 @@ const UDP_PORT_PROTO = {
   51820: "WireGuard",
 };
 
-const TCP_ESTABLISHED = 0x01;
-const TCP_LISTEN = 0x0a;
 const EPHEMERAL_MIN = 32768;
 
 export function protocolForPort(port, transport = "tcp") {
@@ -173,9 +170,6 @@ function isZeroRemote(ip, port, ipv6) {
   return ip === "0.0.0.0";
 }
 
-/**
- * Classify traffic direction relative to this host.
- */
 export function classifyDirection(localPort, remotePort, listeningPorts) {
   const localIsListen =
     listeningPorts.has(localPort) || isWellKnownPort(localPort);
@@ -291,11 +285,10 @@ function parseProcTcp(text, ipv6 = false) {
     const remoteIp = ipv6 ? hexToIpv6(rAddr) : hexToIpv4(rAddr);
     if (!localIp) continue;
 
-    if (st === TCP_LISTEN) {
+    if (st === 0x0a) {
       if (Number.isFinite(localPort)) listeningPorts.add(localPort);
       continue;
     }
-    // Include short-lived TCP states so more connections flash on the map
     if (![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x08, 0x09].includes(st)) {
       continue;
     }
@@ -361,6 +354,7 @@ function parseProcUdp(text, ipv6 = false) {
 
 /**
  * Parse kernel connection tracking — best source for DNS + ICMP ping.
+ * Handles both /proc/net/nf_conntrack and `conntrack -L` text.
  */
 export function parseConntrack(text, localIps = new Set()) {
   const out = [];
@@ -368,7 +362,7 @@ export function parseConntrack(text, localIps = new Set()) {
 
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed || trimmed.startsWith("conntrack v")) continue;
 
     const protoMatch = /\b(tcp|udp|icmp|icmpv6)\b/i.exec(trimmed);
     if (!protoMatch) continue;
@@ -380,14 +374,14 @@ export function parseConntrack(text, localIps = new Set()) {
     if (!tokens.length) continue;
 
     const orig = {};
-    const reply = {};
     let half = orig;
     let sawDst = false;
     for (const m of tokens) {
       const k = m[1];
       const v = m[2];
       if (k === "src" && sawDst && half === orig) {
-        half = reply;
+        // reply tuple starts — we only need original direction
+        break;
       }
       if (k === "dst") sawDst = true;
       if (k === "src" || k === "dst") half[k] = v;
@@ -530,29 +524,70 @@ async function readLocalIps() {
   return ips;
 }
 
+/**
+ * Run conntrack dump. Tries:
+ *  1) plain conntrack (if CAP_NET_ADMIN)
+ *  2) sudo -n conntrack (passwordless sudoers)
+ */
+async function execConntrackList() {
+  const bins = [
+    "conntrack",
+    "/usr/sbin/conntrack",
+    "/sbin/conntrack",
+    "/usr/bin/conntrack",
+  ];
+  const args = ["-L", "-o", "extended"];
+
+  for (const bin of bins) {
+    try {
+      const r = await execFileAsync(bin, args, {
+        timeout: 5000,
+        maxBuffer: 12 * 1024 * 1024,
+      });
+      if (r.stdout && r.stdout.trim()) return r.stdout;
+    } catch {
+      // try next / sudo
+    }
+  }
+
+  // passwordless sudo (configure once — see INSTALL notes)
+  for (const bin of bins) {
+    try {
+      const r = await execFileAsync(
+        "sudo",
+        ["-n", bin, ...args],
+        {
+          timeout: 5000,
+          maxBuffer: 12 * 1024 * 1024,
+        },
+      );
+      if (r.stdout && r.stdout.trim()) return r.stdout;
+    } catch {
+      // continue
+    }
+  }
+
+  return null;
+}
+
 async function readFromConntrack() {
-  const paths = ["/proc/net/nf_conntrack", "/proc/net/ip_conntrack"];
-  for (const p of paths) {
+  // Legacy proc dump (often missing on modern kernels)
+  for (const p of ["/proc/net/nf_conntrack", "/proc/net/ip_conntrack"]) {
     try {
       const text = await fs.readFile(p, "utf8");
-      const localIps = await readLocalIps();
-      return parseConntrack(text, localIps);
+      if (text.trim()) {
+        const localIps = await readLocalIps();
+        return parseConntrack(text, localIps);
+      }
     } catch {
       // try next
     }
   }
 
-  for (const bin of ["conntrack", "/usr/sbin/conntrack", "/sbin/conntrack"]) {
-    try {
-      const r = await execFileAsync(bin, ["-L", "-o", "extended"], {
-        timeout: 4000,
-        maxBuffer: 8 * 1024 * 1024,
-      });
-      const localIps = await readLocalIps();
-      return parseConntrack(r.stdout ?? "", localIps);
-    } catch {
-      // continue
-    }
+  const stdout = await execConntrackList();
+  if (stdout) {
+    const localIps = await readLocalIps();
+    return parseConntrack(stdout, localIps);
   }
   return [];
 }
@@ -655,6 +690,17 @@ async function readFromSs() {
         ...parseSs(tcp.stdout ?? "", listeningPorts, "tcp"),
         ...parseSs(udp.stdout ?? "", listeningPorts, "udp"),
       ];
+      // merge conntrack even when ss works
+      try {
+        const ct = await readFromConntrack();
+        const seen = new Set(out.map((s) => s.key));
+        for (const row of ct) {
+          if (seen.has(row.key)) continue;
+          out.push(enrichSocket(row, listeningPorts));
+        }
+      } catch {
+        // ignore
+      }
       if (out.length) return out;
     } catch (err) {
       lastErr = err;
@@ -671,7 +717,6 @@ async function readFromSs() {
   }
 }
 
-/** @deprecated use readAllConnections */
 export async function readEstablishedTcp() {
   return readAllConnections();
 }
@@ -682,16 +727,6 @@ export async function readAllConnections() {
 
   try {
     const fromSs = await readFromSs();
-    try {
-      const ct = await readFromConntrack();
-      const seen = new Set(fromSs.map((s) => s.key));
-      for (const row of ct) {
-        if (seen.has(row.key)) continue;
-        fromSs.push(enrichSocket(row, new Set()));
-      }
-    } catch {
-      // ignore
-    }
     if (fromSs.length > 0) return fromSs;
   } catch {
     // fall through
