@@ -94,7 +94,7 @@ function ConnectionArc({
       const m = remoteRef.current.material as THREE.MeshBasicMaterial;
       m.opacity = life;
       const s =
-        1 + Math.sin(state.clock.elapsedTime * 6 + conn.createdAt) * 0.1;
+        1 + Math.sin(state.clock.elapsedTime * 6 + conn.createdAt) * 0.08;
       remoteRef.current.scale.setScalar(s * Math.max(life, 0.01));
     }
     if (pulseRef.current) {
@@ -106,8 +106,8 @@ function ConnectionArc({
       );
       pulseRef.current.position.copy(points[idx]!);
       const m = pulseRef.current.material as THREE.MeshBasicMaterial;
-      m.opacity = life * 0.9;
-      pulseRef.current.scale.setScalar(0.5 + life * 0.6);
+      m.opacity = life * 0.85;
+      pulseRef.current.scale.setScalar(0.45 + life * 0.5);
     }
   });
 
@@ -115,7 +115,6 @@ function ConnectionArc({
     ? `${conn.city}${conn.country ? `, ${conn.country}` : ""}`
     : conn.ip;
 
-  // Lift label slightly off the surface toward camera is handled by Html
   const labelPos = useMemo(
     () => remotePos.clone().multiplyScalar(1.04),
     [remotePos],
@@ -136,8 +135,9 @@ function ConnectionArc({
         }}
       />
 
+      {/* Core pin — tiny */}
       <mesh ref={remoteRef} position={remotePos}>
-        <sphereGeometry args={[0.014, 12, 12]} />
+        <sphereGeometry args={[0.0055, 10, 10]} />
         <meshBasicMaterial
           color={colors.dot}
           transparent
@@ -145,19 +145,20 @@ function ConnectionArc({
           toneMapped={false}
         />
       </mesh>
+      {/* Soft halo */}
       <mesh position={remotePos}>
-        <sphereGeometry args={[0.026, 12, 12]} />
+        <sphereGeometry args={[0.011, 10, 10]} />
         <meshBasicMaterial
           color={colors.dot}
           transparent
-          opacity={0.3}
+          opacity={0.28}
           depthWrite={false}
           toneMapped={false}
         />
       </mesh>
 
       <mesh ref={pulseRef}>
-        <sphereGeometry args={[0.009, 10, 10]} />
+        <sphereGeometry args={[0.004, 8, 8]} />
         <meshBasicMaterial
           color={colors.pulse}
           transparent
@@ -209,13 +210,13 @@ function HomeBeacon({
   useFrame((state) => {
     const t = state.clock.elapsedTime;
     if (core.current) {
-      core.current.scale.setScalar(1 + Math.sin(t * 3) * 0.1);
+      core.current.scale.setScalar(1 + Math.sin(t * 3) * 0.08);
     }
     if (ring.current) {
-      const s = 1 + ((t * 0.8) % 1) * 1.5;
+      const s = 1 + ((t * 0.8) % 1) * 1.4;
       const o = 1 - ((t * 0.8) % 1);
       ring.current.scale.setScalar(s);
-      (ring.current.material as THREE.MeshBasicMaterial).opacity = o * 0.55;
+      (ring.current.material as THREE.MeshBasicMaterial).opacity = o * 0.5;
     }
   });
 
@@ -232,7 +233,7 @@ function HomeBeacon({
     <group>
       <group position={pos} quaternion={quat}>
         <mesh ref={core}>
-          <sphereGeometry args={[0.03, 16, 16]} />
+          <sphereGeometry args={[0.014, 14, 14]} />
           <meshBasicMaterial
             color="#2563eb"
             transparent
@@ -241,7 +242,7 @@ function HomeBeacon({
           />
         </mesh>
         <mesh ref={ring} rotation={[Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.034, 0.052, 40]} />
+          <ringGeometry args={[0.016, 0.026, 36]} />
           <meshBasicMaterial
             color="#2563eb"
             transparent
