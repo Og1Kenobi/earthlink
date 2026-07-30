@@ -120,7 +120,7 @@ export function Hud() {
           </div>
           <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted sm:text-sm">
             {mode === "real"
-              ? "Live inbound + outbound TCP — green arcs in, amber arcs out."
+              ? "Tech map · borders on · city labels on each hit (green in, amber out)."
               : mode === "connecting"
                 ? "Connecting to the traffic agent on this server…"
                 : "Demo traffic (agent offline). Install on your server for real sockets."}
@@ -275,14 +275,14 @@ export function Hud() {
           <div className="panel-glass rounded-xl p-3 sm:p-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-faint">
-                <MapPin className="size-3.5 text-warn" />
+                <MapPin className="size-3.5 text-accent" />
                 Home
               </div>
               <button
                 type="button"
                 onClick={onRelocate}
                 disabled={locating || mode === "real"}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface-elevated px-2 text-[11px] text-muted transition hover:border-warn/40 hover:text-warn disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface-elevated px-2 text-[11px] text-muted transition hover:border-accent/40 hover:text-accent disabled:opacity-50"
                 title={
                   mode === "real"
                     ? "Home is this server’s location"
@@ -335,7 +335,7 @@ export function Hud() {
                   return (
                     <li
                       key={c.id}
-                      className="rounded-lg px-2.5 py-2 transition hover:bg-surface-elevated/60"
+                      className="rounded-lg px-2.5 py-2 transition hover:bg-surface/80"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -401,7 +401,7 @@ export function Hud() {
           {connections.slice(0, 8).map((c) => (
             <li
               key={c.id}
-              className="min-w-[9.5rem] shrink-0 rounded-lg border border-border bg-surface-elevated/50 px-2.5 py-2"
+              className="min-w-[9.5rem] shrink-0 rounded-lg border border-border bg-surface px-2.5 py-2"
             >
               <p className="truncate text-xs font-medium text-fg">
                 <span
@@ -423,7 +423,7 @@ export function Hud() {
       </div>
 
       <p className="pointer-events-none mt-2 hidden text-center text-[11px] text-faint sm:block">
-        Drag to orbit · Scroll to zoom · Green = inbound · Amber = outbound
+        Drag to orbit · Scroll to zoom · Labels show peer cities
       </p>
     </div>
   );
@@ -443,7 +443,7 @@ function Stat({
       <p className="text-[10px] uppercase tracking-wider text-faint">{label}</p>
       <p
         className={`mt-0.5 font-mono text-2xl font-semibold tabular-nums ${
-          accent ? "text-primary text-glow" : "text-fg"
+          accent ? "text-primary" : "text-fg"
         }`}
       >
         {value}

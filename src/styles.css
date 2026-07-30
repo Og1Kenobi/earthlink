@@ -2,20 +2,20 @@
 @import "tw-animate-css";
 
 @theme {
-  --color-bg: #05070d;
-  --color-surface: #0c111c;
-  --color-surface-elevated: #121a2a;
-  --color-fg: #e8eef8;
-  --color-muted: #8b97ad;
-  --color-faint: #5a6578;
-  --color-primary: #2ee6a6;
-  --color-primary-dim: #1a9e72;
-  --color-accent: #4cc9f0;
-  --color-warn: #f0b429;
-  --color-danger: #ff6b6b;
-  --color-border: #1e2a3d;
-  --color-border-strong: #2d3f5c;
-  --color-glow: rgb(46 230 166 / 0.35);
+  --color-bg: #ffffff;
+  --color-surface: #f8fafc;
+  --color-surface-elevated: #ffffff;
+  --color-fg: #0f172a;
+  --color-muted: #475569;
+  --color-faint: #94a3b8;
+  --color-primary: #059669;
+  --color-primary-dim: #047857;
+  --color-accent: #0284c7;
+  --color-warn: #d97706;
+  --color-danger: #dc2626;
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+  --color-glow: rgb(5 150 105 / 0.25);
   --font-sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
   --radius: 0.75rem;
@@ -55,28 +55,58 @@
   .panel-glass {
     background: linear-gradient(
       160deg,
-      rgb(12 17 28 / 0.88),
-      rgb(8 12 20 / 0.78)
+      rgb(255 255 255 / 0.92),
+      rgb(248 250 252 / 0.88)
     );
     border: 1px solid var(--color-border);
-    backdrop-filter: blur(16px);
+    backdrop-filter: blur(14px);
     box-shadow:
-      0 0 0 1px rgb(46 230 166 / 0.04),
-      0 18px 48px rgb(0 0 0 / 0.45);
+      0 0 0 1px rgb(15 23 42 / 0.02),
+      0 12px 36px rgb(15 23 42 / 0.08);
   }
 
   .text-glow {
-    text-shadow: 0 0 18px var(--color-glow);
+    text-shadow: 0 0 14px var(--color-glow);
   }
 
-  .scanline {
-    background: linear-gradient(
-      180deg,
-      transparent 0%,
-      rgb(46 230 166 / 0.03) 50%,
-      transparent 100%
-    );
-    background-size: 100% 4px;
-    pointer-events: none;
+  .city-pin {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 3px 7px 4px;
+    border-radius: 6px;
+    border: 1px solid;
+    background: rgb(255 255 255 / 0.92);
+    box-shadow: 0 2px 10px rgb(15 23 42 / 0.12);
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    line-height: 1.15;
+    transform: translateY(-10px);
+  }
+
+  .city-pin-home {
+    color: #1d4ed8;
+    border-color: #2563eb;
+  }
+
+  .city-pin-dir {
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    opacity: 0.85;
+  }
+
+  .city-pin-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: #0f172a;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .city-pin-home .city-pin-name {
+    color: #1e3a8a;
   }
 }

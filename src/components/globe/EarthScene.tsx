@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Stars } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { ConnectionsLayer } from "./ConnectionsLayer";
 import { Earth } from "./Earth";
@@ -8,20 +8,14 @@ import { Earth } from "./Earth";
 function SceneContent() {
   return (
     <>
-      <color attach="background" args={["#05070d"]} />
-      <hemisphereLight args={["#cfe2ff", "#0a1420", 0.9]} />
-      <ambientLight intensity={0.85} color="#eef4ff" />
-      <directionalLight position={[5, 2.5, 4]} intensity={2.8} color="#fff6e8" />
-      <directionalLight position={[-3, -1, -2]} intensity={0.55} color="#7eb6ff" />
-
-      <Stars
-        radius={80}
-        depth={40}
-        count={3500}
-        factor={3}
-        saturation={0}
-        fade
-        speed={0.2}
+      <color attach="background" args={["#ffffff"]} />
+      <hemisphereLight args={["#ffffff", "#cbd5e1", 0.85]} />
+      <ambientLight intensity={1.1} color="#ffffff" />
+      <directionalLight position={[5, 3, 4]} intensity={1.35} color="#ffffff" />
+      <directionalLight
+        position={[-4, -1, -2]}
+        intensity={0.45}
+        color="#93c5fd"
       />
 
       <Suspense fallback={null}>
@@ -58,7 +52,7 @@ export function EarthScene() {
     <div className="relative h-full w-full">
       <Canvas
         className="absolute inset-0 h-full w-full touch-none"
-        dpr={[1, 1.5]}
+        dpr={[1, 1.75]}
         camera={{ position: [0, 0.35, 5.4], fov: 42, near: 0.1, far: 200 }}
         gl={{
           antialias: true,
@@ -67,10 +61,10 @@ export function EarthScene() {
           preserveDrawingBuffer: true,
         }}
         onCreated={({ gl }) => {
-          gl.setClearColor("#05070d");
+          gl.setClearColor("#ffffff");
           gl.outputColorSpace = THREE.SRGBColorSpace;
           gl.toneMapping = THREE.ACESFilmicToneMapping;
-          gl.toneMappingExposure = 1.45;
+          gl.toneMappingExposure = 1.05;
         }}
       >
         <SceneContent />

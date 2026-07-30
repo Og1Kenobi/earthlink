@@ -21,9 +21,9 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Watch remote connections light up on a realistic rotating Earth, with lines to your machine that fade over time.",
+          "Tech globe with country borders — watch inbound and outbound connections light up by city.",
       },
-      { name: "theme-color", content: "#05070d" },
+      { name: "theme-color", content: "#ffffff" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
