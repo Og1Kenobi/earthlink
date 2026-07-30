@@ -16,7 +16,7 @@ export function latLonToVector3(
   return new THREE.Vector3(x, y, z);
 }
 
-/** Great-circle-ish elevated arc between two surface points. */
+/** Great-circle-ish elevated arc between two surface points (low fly). */
 export function createArcPoints(
   start: THREE.Vector3,
   end: THREE.Vector3,
@@ -28,13 +28,12 @@ export function createArcPoints(
   const endN = end.clone().normalize();
   const angle = startN.angleTo(endN);
   const dist = Math.max(angle, 0.05);
-  // Higher arcs for longer hauls
-  const altitude = radius * (0.12 + Math.min(dist / Math.PI, 1) * 0.38);
+  // Low, tight arcs — short hops barely lift; long hauls still modest
+  const altitude = radius * (0.025 + Math.min(dist / Math.PI, 1) * 0.09);
 
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
     const p = new THREE.Vector3().lerpVectors(startN, endN, t).normalize();
-    // Smooth lift that peaks mid-arc
     const lift = Math.sin(t * Math.PI) * altitude;
     p.multiplyScalar(radius + lift);
     points.push(p);

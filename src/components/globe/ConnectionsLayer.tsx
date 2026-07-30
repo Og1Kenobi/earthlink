@@ -47,7 +47,6 @@ function ConnectionArc({
   const { points, remotePos, line, glow } = useMemo(() => {
     const remotePos = latLonToVector3(conn.lat, conn.lon, SURFACE);
     const homePos = latLonToVector3(homeLat, homeLon, SURFACE);
-    // Arc always remote → home; pulse direction flips for outbound
     const points = createArcPoints(remotePos, homePos, EARTH_RADIUS, 64);
     const geo = new THREE.BufferGeometry().setFromPoints(points);
     const line = new THREE.Line(
@@ -66,7 +65,7 @@ function ConnectionArc({
       new THREE.LineBasicMaterial({
         color: colors.glow,
         transparent: true,
-        opacity: 0.2,
+        opacity: 0.18,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         toneMapped: false,
@@ -90,16 +89,15 @@ function ConnectionArc({
     const mat = lineRef.current?.material as THREE.LineBasicMaterial | undefined;
     if (mat) mat.opacity = 0.12 + life * 0.8;
     const gmat = glowRef.current?.material as THREE.LineBasicMaterial | undefined;
-    if (gmat) gmat.opacity = 0.05 + life * 0.2;
+    if (gmat) gmat.opacity = 0.04 + life * 0.16;
     if (remoteRef.current) {
       const m = remoteRef.current.material as THREE.MeshBasicMaterial;
       m.opacity = life;
       const s =
-        1 + Math.sin(state.clock.elapsedTime * 6 + conn.createdAt) * 0.15;
+        1 + Math.sin(state.clock.elapsedTime * 6 + conn.createdAt) * 0.1;
       remoteRef.current.scale.setScalar(s * Math.max(life, 0.01));
     }
     if (pulseRef.current) {
-      // inbound: remote → home (0→1); outbound: home → remote (1→0)
       let t = (state.clock.elapsedTime * 0.9 + conn.createdAt * 0.001) % 1;
       if (direction === "outbound") t = 1 - t;
       const idx = Math.min(
@@ -108,8 +106,8 @@ function ConnectionArc({
       );
       pulseRef.current.position.copy(points[idx]!);
       const m = pulseRef.current.material as THREE.MeshBasicMaterial;
-      m.opacity = life * 0.95;
-      pulseRef.current.scale.setScalar(0.6 + life * 0.85);
+      m.opacity = life * 0.9;
+      pulseRef.current.scale.setScalar(0.5 + life * 0.6);
     }
   });
 
@@ -128,8 +126,9 @@ function ConnectionArc({
         }}
       />
 
+      {/* Core pin — small */}
       <mesh ref={remoteRef} position={remotePos}>
-        <sphereGeometry args={[0.038, 16, 16]} />
+        <sphereGeometry args={[0.012, 12, 12]} />
         <meshBasicMaterial
           color={colors.dot}
           transparent
@@ -138,12 +137,13 @@ function ConnectionArc({
           toneMapped={false}
         />
       </mesh>
+      {/* Soft halo */}
       <mesh position={remotePos}>
-        <sphereGeometry args={[0.075, 16, 16]} />
+        <sphereGeometry args={[0.024, 12, 12]} />
         <meshBasicMaterial
           color={colors.dot}
           transparent
-          opacity={0.22}
+          opacity={0.2}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
           toneMapped={false}
@@ -151,7 +151,7 @@ function ConnectionArc({
       </mesh>
 
       <mesh ref={pulseRef}>
-        <sphereGeometry args={[0.024, 12, 12]} />
+        <sphereGeometry args={[0.008, 10, 10]} />
         <meshBasicMaterial
           color={colors.pulse}
           transparent
@@ -172,13 +172,13 @@ function HomeBeacon({ lat, lon }: { lat: number; lon: number }) {
   useFrame((state) => {
     const t = state.clock.elapsedTime;
     if (core.current) {
-      core.current.scale.setScalar(1 + Math.sin(t * 3) * 0.12);
+      core.current.scale.setScalar(1 + Math.sin(t * 3) * 0.1);
     }
     if (ring.current) {
-      const s = 1 + ((t * 0.8) % 1) * 1.8;
+      const s = 1 + ((t * 0.8) % 1) * 1.5;
       const o = 1 - ((t * 0.8) % 1);
       ring.current.scale.setScalar(s);
-      (ring.current.material as THREE.MeshBasicMaterial).opacity = o * 0.5;
+      (ring.current.material as THREE.MeshBasicMaterial).opacity = o * 0.45;
     }
   });
 
@@ -191,7 +191,7 @@ function HomeBeacon({ lat, lon }: { lat: number; lon: number }) {
   return (
     <group position={pos} quaternion={quat}>
       <mesh ref={core}>
-        <sphereGeometry args={[0.048, 20, 20]} />
+        <sphereGeometry args={[0.028, 16, 16]} />
         <meshBasicMaterial
           color="#f0b429"
           transparent
@@ -201,7 +201,7 @@ function HomeBeacon({ lat, lon }: { lat: number; lon: number }) {
         />
       </mesh>
       <mesh ref={ring} rotation={[Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.055, 0.08, 48]} />
+        <ringGeometry args={[0.032, 0.048, 40]} />
         <meshBasicMaterial
           color="#f0b429"
           transparent
