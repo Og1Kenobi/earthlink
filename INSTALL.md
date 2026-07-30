@@ -158,7 +158,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now earthlink-agent
 ```
 
-macOS / Windows agent commands: **[docs/AGENTS.md](./docs/AGENTS.md)**
+All OS agent deploy (Linux · macOS · Windows · helpers · launchd · Task Scheduler):
+**[docs/AGENTS.md](./docs/AGENTS.md)** · scripts in [`agents/`](./agents/)
 
 ---
 

@@ -50,9 +50,11 @@ npm run agent
 
 | OS | Local hub collector | Edge agent |
 | --- | --- | --- |
-| **Linux** | `/proc` · `ss` · `conntrack` | `npm run agent` |
-| **macOS** | `netstat` · `lsof` | `npm run agent` |
-| **Windows** | `netstat -ano` · `tasklist` | `npm run agent` |
+| **Linux** | `/proc` · `ss` · `conntrack` | `bash agents/run-linux.sh` · systemd |
+| **macOS** | `netstat` · `lsof` | `bash agents/run-macos.sh` · launchd |
+| **Windows** | `netstat -ano` · `tasklist` | `.\agents\run-windows.ps1` · Task Scheduler |
+
+**Full agent deploy (all OS):** **[docs/AGENTS.md](./docs/AGENTS.md)** · helpers in [`agents/`](./agents/)
 
 ---
 
