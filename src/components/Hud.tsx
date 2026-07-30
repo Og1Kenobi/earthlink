@@ -245,7 +245,7 @@ export function Hud() {
       if (c.live === false) continue;
       map.set(c.country, (map.get(c.country) ?? 0) + 1);
     }
-    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
   }, [unmuted]);
 
   const historyMin = useMemo(() => {
@@ -614,13 +614,13 @@ export function Hud() {
             <div className="mt-2 grid grid-cols-2 gap-2">
               <div>
                 <p className="text-[9px] uppercase text-faint">Active</p>
-                <p className="font-mono text-xl font-semibold text-primary text-glow">
+                <p className="font-mono text-lg font-semibold text-primary text-glow">
                   {active}
                 </p>
               </div>
               <div>
                 <p className="text-[9px] uppercase text-faint">Seen</p>
-                <p className="font-mono text-xl font-semibold text-fg">
+                <p className="font-mono text-lg font-semibold text-fg">
                   {totalSeen}
                 </p>
               </div>
@@ -714,7 +714,7 @@ export function Hud() {
                   </span>
                 </div>
                 <ul className="mt-1 space-y-0.5">
-                  {agents.slice(0, 8).map((a) => {
+                  {agents.slice(0, 5).map((a) => {
                     const active = selectedAgentId === a.hostId;
                     return (
                       <li
@@ -804,19 +804,16 @@ export function Hud() {
               </p>
             )}
             {topCountries.length > 0 && (
-              <div className="mt-2 border-t border-border pt-2">
-                <p className="text-[9px] uppercase text-faint">Hot countries</p>
-                <ul className="mt-1 space-y-0.5">
-                  {topCountries.map(([cc, n]) => (
-                    <li
-                      key={cc}
-                      className="flex justify-between font-mono text-[11px] text-muted"
-                    >
-                      <span className="text-fg">{cc}</span>
-                      <span className="text-primary">{n}</span>
-                    </li>
-                  ))}
-                </ul>
+              <div className="mt-1.5 flex flex-wrap gap-1 border-t border-border pt-1.5">
+                {topCountries.map(([cc, n]) => (
+                  <span
+                    key={cc}
+                    className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted"
+                  >
+                    <span className="text-fg">{cc}</span>{" "}
+                    <span className="text-primary">{n}</span>
+                  </span>
+                ))}
               </div>
             )}
             {mode !== "real" && (
@@ -844,6 +841,7 @@ export function Hud() {
             )}
           </div>
 
+          <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <div className="panel-glass shrink-0 rounded-xl px-3 py-2">
             <p className="text-[10px] font-medium uppercase tracking-wider text-faint">
               Top talkers
@@ -852,17 +850,23 @@ export function Hud() {
               {topTalkers.length === 0 ? (
                 <li className="text-[11px] text-muted">Waiting for rates…</li>
               ) : (
-                topTalkers
-                  .filter((t) =>
-                    matchesAgentFilter(
-                      { hostId: t.hostId },
-                      selectedAgentId,
-                      hostId,
-                    ),
-                  )
-                  .slice(0, 4)
-                  .map((t) => (
-
+                (() => {
+                  const seen = new Set<string>();
+                  return topTalkers
+                    .filter((t) =>
+                      matchesAgentFilter(
+                        { hostId: t.hostId },
+                        selectedAgentId,
+                        hostId,
+                      ),
+                    )
+                    .filter((t) => {
+                      if (seen.has(t.ip)) return false;
+                      seen.add(t.ip);
+                      return true;
+                    })
+                    .slice(0, 3);
+                })().map((t) => (
                   <li key={t.ip} className="font-mono text-[10px]">
                     <div className="flex justify-between gap-1 text-fg">
                       <span className="truncate">
@@ -903,11 +907,11 @@ export function Hud() {
                 </button>
               )}
             </div>
-            <ul className="mt-1.5 max-h-[4.5rem] space-y-1 overflow-y-auto">
+            <ul className="mt-1 max-h-[3.25rem] space-y-0.5 overflow-hidden">
               {alerts.length === 0 ? (
                 <li className="text-[11px] text-muted">No alerts yet</li>
               ) : (
-                alerts.slice(0, 4).map((a) => (
+                alerts.slice(0, 2).map((a) => (
                   <li
                     key={a.id}
                     className={`rounded-md border px-1.5 py-0.5 font-mono text-[10px] ${
@@ -1011,6 +1015,7 @@ export function Hud() {
               />
             </div>
           )}
+          </div>
         </aside>
 
         <div className="pointer-events-none relative hidden min-w-0 flex-1 lg:block">
