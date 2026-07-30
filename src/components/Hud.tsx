@@ -314,13 +314,13 @@ export function Hud() {
           </div>
         </aside>
 
-        <aside className="pointer-events-auto hidden w-[min(100%,18rem)] flex-col self-center md:flex">
-          <div className="panel-glass flex max-h-[min(58vh,28rem)] flex-col rounded-xl">
-            <div className="flex items-center gap-2 border-b border-border px-4 py-3 text-xs font-medium uppercase tracking-wider text-faint">
+        <aside className="pointer-events-auto hidden w-[min(100%,18rem)] flex-col self-stretch md:flex">
+          <div className="panel-glass flex h-full min-h-0 max-h-[min(82vh,46rem)] flex-1 flex-col rounded-xl">
+            <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3 text-xs font-medium uppercase tracking-wider text-faint">
               <Radio className="size-3.5 text-primary" />
               Connections
             </div>
-            <ul className="flex-1 space-y-0 overflow-y-auto overscroll-contain px-2 py-2">
+            <ul className="min-h-0 flex-1 space-y-0 overflow-y-auto overscroll-contain px-2 py-2">
               {connections.length === 0 ? (
                 <li className="px-2 py-6 text-center text-xs text-muted">
                   {mode === "real"
@@ -328,7 +328,7 @@ export function Hud() {
                     : "Waiting for traffic…"}
                 </li>
               ) : (
-                connections.slice(0, 24).map((c) => {
+                connections.slice(0, 48).map((c) => {
                   const age = now - c.createdAt;
                   const remaining = Math.max(0, c.ttl - age);
                   const inbound = c.direction === "inbound";
