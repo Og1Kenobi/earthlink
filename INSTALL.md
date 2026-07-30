@@ -225,6 +225,21 @@ sudo -n /usr/sbin/conntrack -L | head
 
 ---
 
+
+### GeoIP (external, cached)
+
+Public peer IPs are looked up once via **ip-api.com** (fallback **ipwho.is**) so the globe can place dots. Results are cached on disk:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `EARTHLINK_GEO_CACHE` | `./data/geo-cache.json` | Cache file path |
+| `EARTHLINK_GEO_TTL_DAYS` | `30` | How long a lookup is reused |
+| `EARTHLINK_GEO_OFFLINE=1` | off | Never call providers (cache only) |
+| `EARTHLINK_GEO_DISABLE=1` | off | No geo at all |
+
+After the first day, almost everything is served from the local cache. Check: `curl -s localhost:8080/api/traffic/health | jq .geo`
+
+
 ## Updating the hub
 
 ```bash
@@ -234,6 +249,21 @@ npm install
 npm run build
 sudo systemctl restart earthlink
 ```
+
+
+### GeoIP (external, cached)
+
+Public peer IPs are looked up once via **ip-api.com** (fallback **ipwho.is**) so the globe can place dots. Results are cached on disk:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `EARTHLINK_GEO_CACHE` | `./data/geo-cache.json` | Cache file path |
+| `EARTHLINK_GEO_TTL_DAYS` | `30` | How long a lookup is reused |
+| `EARTHLINK_GEO_OFFLINE=1` | off | Never call providers (cache only) |
+| `EARTHLINK_GEO_DISABLE=1` | off | No geo at all |
+
+After the first day, almost everything is served from the local cache. Check: `curl -s localhost:8080/api/traffic/health | jq .geo`
+
 
 ## Updating an edge agent
 

@@ -11,3 +11,7 @@ earthlink-server.tgz
 .project_id
 .node_modules.lock
 .grok/
+
+# GeoIP disk cache (may contain public IP metadata)
+data/geo-cache.json
+data/*.tmp

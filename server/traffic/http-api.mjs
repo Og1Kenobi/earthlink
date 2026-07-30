@@ -75,6 +75,13 @@ export async function handleTrafficApi(req, res, urlPath) {
   if (path === "/api/traffic/health") {
     const c = getCollector();
     const snap = c.snapshot();
+    let geo = null;
+    try {
+      const { geoCacheStats } = await import("./geoip.mjs");
+      geo = geoCacheStats();
+    } catch {
+      /* ignore */
+    }
     sendJson(res, 200, {
       ok: !snap.error,
       mode: "real",
@@ -88,6 +95,7 @@ export async function handleTrafficApi(req, res, urlPath) {
       agents: snap.agents,
       includePrivate: snap.includePrivate,
       topTalkers: snap.topTalkers?.slice(0, 5),
+      geo,
     });
     return true;
   }
