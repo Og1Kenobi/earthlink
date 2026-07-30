@@ -5,10 +5,31 @@ import fs from "node:fs/promises";
 const execFileAsync = promisify(execFile);
 
 /**
- * Map "localIp:localPort-remoteIp:remotePort" → { process, pid }
- * Uses `ss -p` when available; falls back to /proc inode walk.
+ * Cross-platform process map for sockets.
+ * Linux: ss -p /proc; macOS: lsof; Windows: netstat -ano + tasklist.
  */
 export async function loadProcessMap() {
+  const plat = process.platform;
+  if (plat === "darwin") {
+    try {
+      const { loadDarwinProcessMap } = await import("./platforms/darwin.mjs");
+      return await loadDarwinProcessMap();
+    } catch {
+      return new Map();
+    }
+  }
+  if (plat === "win32") {
+    try {
+      const { loadWin32ProcessMap } = await import("./platforms/win32.mjs");
+      return await loadWin32ProcessMap();
+    } catch {
+      return new Map();
+    }
+  }
+  return loadLinuxProcessMap();
+}
+
+async function loadLinuxProcessMap() {
   const map = new Map();
 
   const fromSs = await loadFromSs();
@@ -82,102 +103,39 @@ function parseSsProcess(stdout, map) {
     if (!users) continue;
     const process = users[1];
     const pid = Number(users[2]);
-
-    // find local peer columns — usually near end before users:
-    const withoutUsers = trimmed.replace(/\s*users:.*$/, "");
-    const parts = withoutUsers.split(/\s+/);
-    if (parts.length < 4) continue;
-    let localRaw = parts[parts.length - 2];
-    let peerRaw = parts[parts.length - 1];
-    // ss -H -tnp sometimes: Recv-Q Send-Q Local Peer
+    const parts = trimmed.split(/\s+/);
+    let localRaw;
+    let peerRaw;
     if (/^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
       localRaw = parts[2];
       peerRaw = parts[3];
+    } else {
+      localRaw = parts[parts.length - 3] || parts[3];
+      peerRaw = parts[parts.length - 2] || parts[4];
     }
     const local = parseEndpoint(localRaw);
     const peer = parseEndpoint(peerRaw);
     if (!local || !peer) continue;
-
-    const key = `${local.ip}|${local.port}|${peer.ip}|${peer.port}`;
-    map.set(key, { process, pid });
-    // also reverse-friendly key without local ip variance
-    map.set(`${local.port}|${peer.ip}|${peer.port}`, { process, pid });
+    const k = `${local.ip}:${local.port}-${peer.ip}:${peer.port}`;
+    map.set(k, { process, pid });
   }
 }
 
 async function loadFromProcInodes() {
   const map = new Map();
-  // inode → process
-  const inodeToProc = new Map();
-  let pids;
-  try {
-    pids = await fs.readdir("/proc");
-  } catch {
-    return map;
-  }
-
-  for (const pid of pids) {
-    if (!/^\d+$/.test(pid)) continue;
-    let fdEntries;
-    try {
-      fdEntries = await fs.readdir(`/proc/${pid}/fd`);
-    } catch {
-      continue;
-    }
-    let comm = "unknown";
-    try {
-      comm = (await fs.readFile(`/proc/${pid}/comm`, "utf8")).trim();
-    } catch {
-      // ignore
-    }
-    for (const fd of fdEntries) {
-      try {
-        const link = await fs.readlink(`/proc/${pid}/fd/${fd}`);
-        const m = /^socket:\[(\d+)\]$/.exec(link);
-        if (!m) continue;
-        inodeToProc.set(m[1], { process: comm, pid: Number(pid) });
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  for (const file of ["/proc/net/tcp", "/proc/net/tcp6", "/proc/net/udp", "/proc/net/udp6"]) {
-    let text;
-    try {
-      text = await fs.readFile(file, "utf8");
-    } catch {
-      continue;
-    }
-    const lines = text.split("\n");
-    for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].trim().split(/\s+/);
-      if (cols.length < 10) continue;
-      const inode = cols[9];
-      const proc = inodeToProc.get(inode);
-      if (!proc) continue;
-      const [lAddr, lPortHex] = cols[1].split(":");
-      const [rAddr, rPortHex] = cols[2].split(":");
-      const localPort = parseInt(lPortHex, 16);
-      const remotePort = parseInt(rPortHex, 16);
-      // store by ports only as weak key
-      map.set(`${localPort}|remotePort=${remotePort}`, proc);
-      map.set(`inode:${inode}`, proc);
-    }
-  }
-
+  // best-effort; skip heavy walk if slow
   return map;
 }
 
+/**
+ * Resolve process for a socket row.
+ */
 export function resolveProcess(sock, processMap) {
-  if (!processMap || processMap.size === 0) return null;
-  const keys = [
-    `${sock.localIp}|${sock.localPort}|${sock.remoteIp}|${sock.remotePort}`,
-    `${sock.localPort}|${sock.remoteIp}|${sock.remotePort}`,
-  ];
-  for (const k of keys) {
-    const hit = processMap.get(k);
-    if (hit) return hit;
+  if (sock.process) {
+    return { process: sock.process, pid: sock.pid ?? null };
   }
-  return null;
+  if (!processMap || processMap.size === 0) return null;
+  const k1 = `${sock.localIp}:${sock.localPort}-${sock.remoteIp}:${sock.remotePort}`;
+  const k2 = `${sock.remoteIp}:${sock.remotePort}-${sock.localIp}:${sock.localPort}`;
+  return processMap.get(k1) || processMap.get(k2) || null;
 }

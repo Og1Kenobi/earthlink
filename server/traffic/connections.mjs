@@ -101,153 +101,81 @@ export function isPrivateIp(ip) {
   const a = Number(m[1]);
   const b = Number(m[2]);
   if (a === 10) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 169 && b === 254) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
   return false;
 }
 
 export function parseEndpoint(raw) {
-  const s = String(raw).trim();
-  if (!s || s === "*:*" || s === "*") return null;
+  const s = String(raw || "").trim();
+  if (!s || s === "*:*" || s === "*.*") return null;
+
+  // macOS style: 1.2.3.4.443 or *.1234
+  if (/^\d+\.\d+\.\d+\.\d+\.\d+$/.test(s) || /^\*\.\d+$/.test(s)) {
+    const lastDot = s.lastIndexOf(".");
+    const ip = s.slice(0, lastDot).replace(/^\*$/, "0.0.0.0");
+    const port = Number(s.slice(lastDot + 1));
+    if (!Number.isFinite(port)) return null;
+    return { ip, port };
+  }
 
   if (s.startsWith("[")) {
     const close = s.indexOf("]");
     if (close === -1) return null;
     const ip = s.slice(1, close);
-    const port = Number(s.slice(close + 2));
-    if (!ip || !Number.isFinite(port)) return null;
-    return { ip, port };
+    const rest = s.slice(close + 1);
+    const port = Number(rest.startsWith(":") ? rest.slice(1) : rest);
+    return { ip, port: Number.isFinite(port) ? port : 0 };
   }
 
-  const lastColon = s.lastIndexOf(":");
-  if (lastColon === -1) return null;
-  const host = s.slice(0, lastColon);
-  const port = Number(s.slice(lastColon + 1));
-  if (!host || !Number.isFinite(port)) return null;
-  return { ip: host, port };
-}
-
-function hexToIpv4(hex) {
-  const n = parseInt(hex, 16);
-  if (!Number.isFinite(n)) return null;
-  const b0 = n & 0xff;
-  const b1 = (n >>> 8) & 0xff;
-  const b2 = (n >>> 16) & 0xff;
-  const b3 = (n >>> 24) & 0xff;
-  return `${b0}.${b1}.${b2}.${b3}`;
-}
-
-function hexToIpv6(hex) {
-  if (hex.length !== 32) return null;
-  const parts = [];
-  for (let i = 0; i < 32; i += 8) {
-    const word = hex.slice(i, i + 8);
-    const n = parseInt(word, 16);
-    const b0 = n & 0xff;
-    const b1 = (n >>> 8) & 0xff;
-    const b2 = (n >>> 16) & 0xff;
-    const b3 = (n >>> 24) & 0xff;
-    parts.push(
-      ((b0 << 8) | b1).toString(16).padStart(4, "0"),
-      ((b2 << 8) | b3).toString(16).padStart(4, "0"),
-    );
+  const v6DotPort = /^([0-9a-fA-F:]+)\.(\d+)$/.exec(s);
+  if (v6DotPort && s.includes(":")) {
+    return { ip: v6DotPort[1], port: Number(v6DotPort[2]) };
   }
-  return parts.join(":").replace(/(^|:)0{1,3}/g, "$1");
-}
 
-function isZeroRemote(ip, port, ipv6) {
-  if (port === 0) return true;
-  if (!ip) return true;
-  if (ipv6) {
-    return (
-      ip === "0:0:0:0:0:0:0:0" ||
-      ip.startsWith("0:0:0:0:0:0:0:") ||
-      ip === "::"
-    );
-  }
-  return ip === "0.0.0.0";
+  const i = s.lastIndexOf(":");
+  if (i === -1) return null;
+  const ip = s.slice(0, i);
+  const port = Number(s.slice(i + 1));
+  if (!ip || !Number.isFinite(port)) return null;
+  return { ip: ip === "*" ? "0.0.0.0" : ip, port };
 }
 
 export function classifyDirection(localPort, remotePort, listeningPorts) {
-  const localIsListen =
-    listeningPorts.has(localPort) || isWellKnownPort(localPort);
-  const remoteIsService = isWellKnownPort(remotePort);
+  const localListen =
+    listeningPorts.has(localPort) ||
+    (localPort > 0 && localPort < 1024) ||
+    isWellKnownPort(localPort);
+  const remoteService =
+    isWellKnownPort(remotePort) || (remotePort > 0 && remotePort < 1024);
 
-  if (listeningPorts.has(localPort)) {
-    return {
-      direction: "inbound",
-      servicePort: localPort,
-      peerPort: remotePort,
-    };
+  if (localListen && !remoteService) return "inbound";
+  if (remoteService && !localListen) return "outbound";
+  if (localListen && remoteService) {
+    if (listeningPorts.has(localPort)) return "inbound";
+    if (remotePort < localPort) return "outbound";
+    return "inbound";
   }
-
-  if (localIsListen && !remoteIsService) {
-    return {
-      direction: "inbound",
-      servicePort: localPort,
-      peerPort: remotePort,
-    };
-  }
-
-  if (remoteIsService && localPort >= 1024) {
-    return {
-      direction: "outbound",
-      servicePort: remotePort,
-      peerPort: localPort,
-    };
-  }
-
-  if (localIsListen && remoteIsService) {
-    if (localPort <= remotePort) {
-      return {
-        direction: "inbound",
-        servicePort: localPort,
-        peerPort: remotePort,
-      };
-    }
-    return {
-      direction: "outbound",
-      servicePort: remotePort,
-      peerPort: localPort,
-    };
-  }
-
-  if (localPort >= EPHEMERAL_MIN || localPort > remotePort) {
-    return {
-      direction: "outbound",
-      servicePort: remotePort,
-      peerPort: localPort,
-    };
-  }
-  return {
-    direction: "inbound",
-    servicePort: localPort,
-    peerPort: remotePort,
-  };
+  if (localPort >= EPHEMERAL_MIN && remotePort < EPHEMERAL_MIN) return "outbound";
+  if (remotePort >= EPHEMERAL_MIN && localPort < EPHEMERAL_MIN) return "inbound";
+  return "outbound";
 }
 
-function enrichSocket(base, listeningPorts) {
+export function enrichSocket(base, listeningPorts = new Set()) {
   const transport = base.transport || "tcp";
-  let direction = base.direction;
-  let servicePort = base.servicePort;
-  let peerPort = base.peerPort;
+  const direction =
+    base.direction ||
+    classifyDirection(base.localPort, base.remotePort, listeningPorts);
 
-  if (!direction) {
-    const c = classifyDirection(
-      base.localPort ?? 0,
-      base.remotePort ?? 0,
-      listeningPorts,
-    );
-    direction = c.direction;
-    servicePort = c.servicePort;
-    peerPort = c.peerPort;
-  }
-
-  if (transport === "icmp") {
-    servicePort = 0;
-    peerPort = 0;
+  let servicePort;
+  let peerPort;
+  if (direction === "inbound") {
+    servicePort = base.localPort;
+    peerPort = base.remotePort;
+  } else {
+    servicePort = base.remotePort;
+    peerPort = base.localPort;
   }
 
   const protocol =
@@ -262,7 +190,49 @@ function enrichSocket(base, listeningPorts) {
     peerPort: peerPort ?? base.localPort ?? 0,
     protocol,
     displayPort: servicePort ?? base.remotePort ?? 0,
+    private: base.private ?? isPrivateIp(base.remoteIp),
   };
+}
+
+function hexToIpv4(hex) {
+  if (!hex || hex.length !== 8) return null;
+  const n = parseInt(hex, 16);
+  if (!Number.isFinite(n)) return null;
+  return [
+    n & 0xff,
+    (n >> 8) & 0xff,
+    (n >> 16) & 0xff,
+    (n >> 24) & 0xff,
+  ].join(".");
+}
+
+function hexToIpv6(hex) {
+  if (!hex || hex.length !== 32) return null;
+  try {
+    const bytes = [];
+    for (let i = 0; i < 32; i += 2) {
+      bytes.push(parseInt(hex.slice(i, i + 2), 16));
+    }
+    const be = [];
+    for (let i = 0; i < 16; i += 4) {
+      be.push(bytes[i + 3], bytes[i + 2], bytes[i + 1], bytes[i]);
+    }
+    const hextets = [];
+    for (let i = 0; i < 16; i += 2) {
+      hextets.push(((be[i] << 8) | be[i + 1]).toString(16));
+    }
+    return hextets.join(":");
+  } catch {
+    return null;
+  }
+}
+
+function isZeroRemote(ip, port, ipv6) {
+  if (port === 0) return true;
+  if (!ip) return true;
+  if (ip === "0.0.0.0") return true;
+  if (ipv6 && (ip === "::" || ip === "0:0:0:0:0:0:0:0")) return true;
+  return false;
 }
 
 function parseProcTcp(text, ipv6 = false) {
@@ -352,10 +322,6 @@ function parseProcUdp(text, ipv6 = false) {
   return { rows, listeningPorts };
 }
 
-/**
- * Parse kernel connection tracking — best source for DNS + ICMP ping.
- * Handles both /proc/net/nf_conntrack and `conntrack -L` text.
- */
 export function parseConntrack(text, localIps = new Set()) {
   const out = [];
   const seen = new Set();
@@ -368,380 +334,194 @@ export function parseConntrack(text, localIps = new Set()) {
     if (!protoMatch) continue;
     const transport = protoMatch[1].toLowerCase().replace("icmpv6", "icmp");
 
-    const tokens = [
-      ...trimmed.matchAll(/\b(src|dst|sport|dport|type)=([^\s]+)/g),
-    ];
-    if (!tokens.length) continue;
-
-    const orig = {};
-    let half = orig;
-    let sawDst = false;
-    for (const m of tokens) {
+    const pairs = [...trimmed.matchAll(/\b(src|dst|sport|dport|type)=([^\s]+)/g)];
+    /** @type {Record<string, string[]>} */
+    const bag = {};
+    for (const m of pairs) {
       const k = m[1];
       const v = m[2];
-      if (k === "src" && sawDst && half === orig) {
-        // reply tuple starts — we only need original direction
-        break;
-      }
-      if (k === "dst") sawDst = true;
-      if (k === "src" || k === "dst") half[k] = v;
-      if (k === "sport" || k === "dport") half[k] = Number(v);
-      if (k === "type") half.type = Number(v);
+      if (!bag[k]) bag[k] = [];
+      bag[k].push(v);
     }
+    const srcs = bag.src || [];
+    const dsts = bag.dst || [];
+    const sports = bag.sport || [];
+    const dports = bag.dport || [];
 
-    if (!orig.src || !orig.dst) continue;
+    if (srcs.length < 1 || dsts.length < 1) continue;
 
-    let localIp;
-    let remoteIp;
-    let localPort = 0;
-    let remotePort = 0;
+    let localIp = srcs[0];
+    let remoteIp = dsts[0];
+    let localPort = Number(sports[0] || 0);
+    let remotePort = Number(dports[0] || 0);
     let direction = "outbound";
 
-    const origSrcLocal =
-      localIps.has(orig.src) ||
-      isPrivateIp(orig.src) ||
-      isLoopback(orig.src);
-    const origDstLocal =
-      localIps.has(orig.dst) ||
-      isPrivateIp(orig.dst) ||
-      isLoopback(orig.dst);
-
-    if (transport === "icmp") {
-      if (origSrcLocal && !origDstLocal) {
-        localIp = orig.src;
-        remoteIp = orig.dst;
-        direction = "outbound";
-      } else if (origDstLocal && !origSrcLocal) {
-        localIp = orig.dst;
-        remoteIp = orig.src;
-        direction = "inbound";
-      } else {
-        localIp = orig.src;
-        remoteIp = orig.dst;
-        direction = "outbound";
-      }
-    } else {
-      const sport = orig.sport ?? 0;
-      const dport = orig.dport ?? 0;
-
-      if (origSrcLocal && !isLoopback(orig.dst)) {
-        localIp = orig.src;
-        remoteIp = orig.dst;
-        localPort = sport;
-        remotePort = dport;
-        direction =
-          isWellKnownPort(sport) && !isWellKnownPort(dport)
-            ? "inbound"
-            : "outbound";
-      } else if (origDstLocal && !isLoopback(orig.src)) {
-        localIp = orig.dst;
-        remoteIp = orig.src;
-        localPort = dport;
-        remotePort = sport;
-        direction = "inbound";
-      } else {
-        localIp = orig.src;
-        remoteIp = orig.dst;
-        localPort = sport;
-        remotePort = dport;
-        if (isWellKnownPort(sport) && !isWellKnownPort(dport)) {
-          direction = "inbound";
-          localIp = orig.dst;
-          remoteIp = orig.src;
-          localPort = dport;
-          remotePort = sport;
-        } else {
-          direction = "outbound";
-        }
-      }
+    if (localIps.size && localIps.has(dsts[0]) && !localIps.has(srcs[0])) {
+      remoteIp = srcs[0];
+      localIp = dsts[0];
+      remotePort = Number(sports[0] || 0);
+      localPort = Number(dports[0] || 0);
+      direction = "inbound";
+    } else if (localIps.size && localIps.has(srcs[0])) {
+      direction = "outbound";
     }
 
-    if (!remoteIp || isLoopback(remoteIp)) continue;
-    if (isLoopback(localIp)) continue;
+    if (transport === "icmp") {
+      remotePort = 0;
+      localPort = 0;
+    }
 
-    const key =
-      transport === "icmp"
-        ? `icmp|${remoteIp}|${localIp}`
-        : `${transport}|${remoteIp}|${remotePort}|${localIp}|${localPort}`;
+    if (!remoteIp || isLoopback(remoteIp) || isLoopback(localIp)) continue;
 
+    const key = `${transport}|${remoteIp}|${remotePort}|${localIp}|${localPort}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
-    out.push({
-      transport,
-      localIp,
-      localPort,
-      remoteIp,
-      remotePort,
-      key,
-      private: isPrivateIp(remoteIp),
-      direction,
-      servicePort:
-        transport === "icmp"
-          ? 0
-          : direction === "inbound"
-            ? localPort
-            : remotePort,
-      peerPort:
-        transport === "icmp"
-          ? 0
-          : direction === "inbound"
-            ? remotePort
-            : localPort,
-      protocol:
-        transport === "icmp"
-          ? "PING"
-          : protocolForPort(
-              direction === "inbound" ? localPort : remotePort,
-              transport,
-            ),
-    });
+    out.push(
+      enrichSocket(
+        {
+          transport,
+          localIp,
+          localPort,
+          remoteIp,
+          remotePort,
+          key,
+          direction,
+          private: isPrivateIp(remoteIp),
+          protocol:
+            transport === "icmp"
+              ? "PING"
+              : protocolForPort(
+                  direction === "inbound" ? localPort : remotePort,
+                  transport,
+                ),
+        },
+        new Set(),
+      ),
+    );
   }
-
   return out;
 }
 
 async function readLocalIps() {
   const ips = new Set();
   try {
-    const r = await execFileAsync("hostname", ["-I"], { timeout: 2000 });
-    for (const part of (r.stdout ?? "").trim().split(/\s+/)) {
-      if (part) ips.add(part);
-    }
-  } catch {
-    try {
-      const r = await execFileAsync("ip", ["-o", "addr", "show"], {
-        timeout: 2000,
-      });
-      for (const line of (r.stdout ?? "").split("\n")) {
-        const m = /\binet6?\s+([0-9a-fA-F.:]+)/.exec(line);
-        if (m) ips.add(m[1].split("/")[0]);
+    const os = await import("node:os");
+    const ifs = os.networkInterfaces();
+    for (const list of Object.values(ifs)) {
+      for (const a of list || []) {
+        if (a?.address) ips.add(a.address);
       }
-    } catch {
-      // ignore
-    }
-  }
-  return ips;
-}
-
-/**
- * Run conntrack dump. Tries:
- *  1) plain conntrack (if CAP_NET_ADMIN)
- *  2) sudo -n conntrack (passwordless sudoers)
- */
-async function execConntrackList() {
-  const bins = [
-    "conntrack",
-    "/usr/sbin/conntrack",
-    "/sbin/conntrack",
-    "/usr/bin/conntrack",
-  ];
-  const args = ["-L", "-o", "extended"];
-
-  for (const bin of bins) {
-    try {
-      const r = await execFileAsync(bin, args, {
-        timeout: 5000,
-        maxBuffer: 12 * 1024 * 1024,
-      });
-      if (r.stdout && r.stdout.trim()) return r.stdout;
-    } catch {
-      // try next / sudo
-    }
-  }
-
-  // passwordless sudo (configure once — see INSTALL notes)
-  for (const bin of bins) {
-    try {
-      const r = await execFileAsync(
-        "sudo",
-        ["-n", bin, ...args],
-        {
-          timeout: 5000,
-          maxBuffer: 12 * 1024 * 1024,
-        },
-      );
-      if (r.stdout && r.stdout.trim()) return r.stdout;
-    } catch {
-      // continue
-    }
-  }
-
-  return null;
-}
-
-async function readFromConntrack() {
-  // Legacy proc dump (often missing on modern kernels)
-  for (const p of ["/proc/net/nf_conntrack", "/proc/net/ip_conntrack"]) {
-    try {
-      const text = await fs.readFile(p, "utf8");
-      if (text.trim()) {
-        const localIps = await readLocalIps();
-        return parseConntrack(text, localIps);
-      }
-    } catch {
-      // try next
-    }
-  }
-
-  const stdout = await execConntrackList();
-  if (stdout) {
-    const localIps = await readLocalIps();
-    return parseConntrack(stdout, localIps);
-  }
-  return [];
-}
-
-async function readFromProc() {
-  const established = [];
-  const listeningPorts = new Set();
-  const seen = new Set();
-
-  for (const [file, ipv6] of [
-    ["/proc/net/tcp", false],
-    ["/proc/net/tcp6", true],
-  ]) {
-    try {
-      const text = await fs.readFile(file, "utf8");
-      const parsed = parseProcTcp(text, ipv6);
-      for (const p of parsed.listeningPorts) listeningPorts.add(p);
-      for (const row of parsed.established) {
-        if (seen.has(row.key)) continue;
-        seen.add(row.key);
-        established.push(row);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  for (const [file, ipv6] of [
-    ["/proc/net/udp", false],
-    ["/proc/net/udp6", true],
-  ]) {
-    try {
-      const text = await fs.readFile(file, "utf8");
-      const parsed = parseProcUdp(text, ipv6);
-      for (const p of parsed.listeningPorts) listeningPorts.add(p);
-      for (const row of parsed.rows) {
-        if (seen.has(row.key)) continue;
-        seen.add(row.key);
-        established.push(row);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  try {
-    const ct = await readFromConntrack();
-    for (const row of ct) {
-      if (seen.has(row.key)) continue;
-      if (row.transport === "tcp") {
-        const alt = `tcp|${row.remoteIp}|${row.remotePort}|${row.localIp}|${row.localPort}`;
-        if (seen.has(alt)) continue;
-      }
-      seen.add(row.key);
-      established.push(row);
-    }
-  } catch {
-    // conntrack optional
-  }
-
-  return established.map((s) => enrichSocket(s, listeningPorts));
-}
-
-async function readListeningPortsFromSs(bin) {
-  const ports = new Set();
-  try {
-    const r = await execFileAsync(bin, ["-H", "-tuln"], {
-      timeout: 3000,
-      maxBuffer: 2 * 1024 * 1024,
-    });
-    for (const line of (r.stdout ?? "").split("\n")) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length < 4) continue;
-      const local = parseEndpoint(parts[4] ?? parts[3] ?? parts[2]);
-      if (local?.port) ports.add(local.port);
     }
   } catch {
     // ignore
   }
-  return ports;
+  return ips;
 }
 
-async function readFromSs() {
-  const paths = ["ss", "/usr/sbin/ss", "/sbin/ss", "/usr/bin/ss"];
-  let lastErr;
-  for (const bin of paths) {
+async function execConntrackList() {
+  const bins = [
+    ["sudo", ["-n", "conntrack", "-L"]],
+    ["sudo", ["-n", "/usr/sbin/conntrack", "-L"]],
+    ["conntrack", ["-L"]],
+    ["/usr/sbin/conntrack", ["-L"]],
+  ];
+  for (const [bin, args] of bins) {
     try {
-      const listeningPorts = await readListeningPortsFromSs(bin);
-      const [tcp, udp] = await Promise.all([
-        execFileAsync(bin, ["-H", "-tn", "state", "established"], {
-          timeout: 4000,
-          maxBuffer: 4 * 1024 * 1024,
-        }).catch(() => ({ stdout: "" })),
-        execFileAsync(bin, ["-H", "-un"], {
-          timeout: 4000,
-          maxBuffer: 4 * 1024 * 1024,
-        }).catch(() => ({ stdout: "" })),
-      ]);
-      const out = [
-        ...parseSs(tcp.stdout ?? "", listeningPorts, "tcp"),
-        ...parseSs(udp.stdout ?? "", listeningPorts, "udp"),
-      ];
-      // merge conntrack even when ss works
-      try {
-        const ct = await readFromConntrack();
-        const seen = new Set(out.map((s) => s.key));
-        for (const row of ct) {
-          if (seen.has(row.key)) continue;
-          out.push(enrichSocket(row, listeningPorts));
-        }
-      } catch {
-        // ignore
-      }
-      if (out.length) return out;
-    } catch (err) {
-      lastErr = err;
+      const r = await execFileAsync(bin, args, {
+        timeout: 5000,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+      if (r.stdout) return r.stdout;
+    } catch {
+      // try next
     }
   }
   try {
-    const r = await execFileAsync("netstat", ["-tun"], {
-      timeout: 4000,
-      maxBuffer: 4 * 1024 * 1024,
+    return await fs.readFile("/proc/net/nf_conntrack", "utf8");
+  } catch {
+    return "";
+  }
+}
+
+async function readFromConntrack() {
+  const text = await execConntrackList();
+  if (!text) return [];
+  const localIps = await readLocalIps();
+  return parseConntrack(text, localIps);
+}
+
+async function readFromProc() {
+  const out = [];
+  const listening = new Set();
+  try {
+    const tcp = await fs.readFile("/proc/net/tcp", "utf8");
+    const p = parseProcTcp(tcp, false);
+    out.push(...p.established);
+    for (const x of p.listeningPorts) listening.add(x);
+  } catch {
+    // not linux
+  }
+  try {
+    const tcp6 = await fs.readFile("/proc/net/tcp6", "utf8");
+    const p = parseProcTcp(tcp6, true);
+    out.push(...p.established);
+    for (const x of p.listeningPorts) listening.add(x);
+  } catch {
+    // optional
+  }
+  try {
+    const udp = await fs.readFile("/proc/net/udp", "utf8");
+    const p = parseProcUdp(udp, false);
+    out.push(...p.rows);
+    for (const x of p.listeningPorts) listening.add(x);
+  } catch {
+    // optional
+  }
+  try {
+    const udp6 = await fs.readFile("/proc/net/udp6", "utf8");
+    const p = parseProcUdp(udp6, true);
+    out.push(...p.rows);
+    for (const x of p.listeningPorts) listening.add(x);
+  } catch {
+    // optional
+  }
+
+  let ct = [];
+  try {
+    ct = await readFromConntrack();
+  } catch {
+    ct = [];
+  }
+
+  const seen = new Set(out.map((s) => s.key));
+  for (const s of ct) {
+    if (!seen.has(s.key)) {
+      seen.add(s.key);
+      out.push(s);
+    }
+  }
+
+  return out.map((s) => enrichSocket(s, listening));
+}
+
+async function readListeningPortsFromSs(bin) {
+  const listening = new Set();
+  try {
+    const r = await execFileAsync(bin, ["-H", "-tln"], {
+      timeout: 3000,
+      maxBuffer: 2 * 1024 * 1024,
     });
-    return parseNetstat(r.stdout ?? "", new Set());
-  } catch {
-    throw lastErr ?? new Error("ss/netstat unavailable");
-  }
-}
-
-export async function readEstablishedTcp() {
-  return readAllConnections();
-}
-
-export async function readAllConnections() {
-  const fromProc = await readFromProc();
-  if (fromProc.length > 0) return fromProc;
-
-  try {
-    const fromSs = await readFromSs();
-    if (fromSs.length > 0) return fromSs;
-  } catch {
-    // fall through
-  }
-
-  try {
-    await fs.access("/proc/net/tcp");
-    return fromProc;
-  } catch {
-    try {
-      return await readFromSs();
-    } catch (err) {
-      throw new Error(`Cannot read sockets: ${err?.message ?? err}`);
+    for (const line of (r.stdout || "").split("\n")) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 4) continue;
+      const local = parseEndpoint(parts[3] || parts[2]);
+      if (local?.port) listening.add(local.port);
     }
+  } catch {
+    // ignore
   }
+  return listening;
 }
 
 function parseSs(stdout, listeningPorts = new Set(), transport = "tcp") {
@@ -811,12 +591,12 @@ function parseNetstat(stdout, listeningPorts = new Set()) {
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const isTcp = trimmed.startsWith("tcp");
-    const isUdp = trimmed.startsWith("udp");
+    const isTcp = /^tcp/i.test(trimmed);
+    const isUdp = /^udp/i.test(trimmed);
     if (!isTcp && !isUdp) continue;
     if (/LISTEN/i.test(trimmed)) {
       const parts = trimmed.split(/\s+/);
-      const local = parseEndpoint(parts[3]);
+      const local = parseEndpoint(parts[3] || parts[1]);
       if (local?.port) listeningPorts.add(local.port);
       continue;
     }
@@ -852,4 +632,105 @@ function parseNetstat(stdout, listeningPorts = new Set()) {
     );
   }
   return out;
+}
+
+async function readFromSs() {
+  const bins = ["ss", "/usr/sbin/ss", "/sbin/ss", "/usr/bin/ss"];
+  let lastErr = null;
+  for (const bin of bins) {
+    try {
+      const listening = await readListeningPortsFromSs(bin);
+      const out = [];
+      for (const [args, transport] of [
+        [["-H", "-tn"], "tcp"],
+        [["-H", "-un"], "udp"],
+      ]) {
+        try {
+          const r = await execFileAsync(bin, args, {
+            timeout: 4000,
+            maxBuffer: 4 * 1024 * 1024,
+          });
+          out.push(...parseSs(r.stdout ?? "", listening, transport));
+        } catch {
+          // ignore
+        }
+      }
+      if (out.length) return out;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  try {
+    const r = await execFileAsync("netstat", ["-tun"], {
+      timeout: 4000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return parseNetstat(r.stdout ?? "", new Set());
+  } catch {
+    throw lastErr ?? new Error("ss/netstat unavailable");
+  }
+}
+
+export async function readLinuxConnections() {
+  const fromProc = await readFromProc();
+  if (fromProc.length > 0) return fromProc;
+
+  try {
+    const fromSs = await readFromSs();
+    if (fromSs.length > 0) return fromSs;
+  } catch {
+    // fall through
+  }
+
+  try {
+    await fs.access("/proc/net/tcp");
+    return fromProc;
+  } catch {
+    try {
+      return await readFromSs();
+    } catch (err) {
+      throw new Error(`Cannot read sockets: ${err?.message ?? err}`);
+    }
+  }
+}
+
+export async function readEstablishedTcp() {
+  return readAllConnections();
+}
+
+/**
+ * Cross-platform entry: Linux / macOS / Windows (dynamic import avoids cycles).
+ */
+export async function readAllConnections() {
+  const plat = process.platform;
+  if (plat === "darwin") {
+    const { readDarwinConnections } = await import("./platforms/darwin.mjs");
+    return readDarwinConnections();
+  }
+  if (plat === "win32") {
+    const { readWin32Connections } = await import("./platforms/win32.mjs");
+    return readWin32Connections();
+  }
+  try {
+    return await readLinuxConnections();
+  } catch (err) {
+    if (plat === "linux") throw err;
+    try {
+      const r = await execFileAsync("netstat", ["-an"], {
+        timeout: 5000,
+        maxBuffer: 4 * 1024 * 1024,
+      });
+      return parseNetstat(r.stdout ?? "", new Set());
+    } catch {
+      throw err;
+    }
+  }
+}
+
+export function platformId() {
+  const p = process.platform;
+  if (p === "darwin") return "macos";
+  if (p === "win32") return "windows";
+  if (p === "linux") return "linux";
+  return p;
 }

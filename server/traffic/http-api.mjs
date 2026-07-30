@@ -53,7 +53,7 @@ export async function handleTrafficApi(req, res, urlPath) {
     res.statusCode = 204;
     res.setHeader("access-control-allow-origin", "*");
     res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
-    res.setHeader("access-control-allow-headers", "content-type");
+    res.setHeader("access-control-allow-headers", "content-type, authorization, x-earthlink-token");
     res.end();
     return true;
   }
@@ -83,10 +83,42 @@ export async function handleTrafficApi(req, res, urlPath) {
       home: snap.home,
       mutedIps: snap.mutedIps ?? [],
       hostId: snap.hostId,
+      os: snap.os,
+      osLabel: snap.osLabel,
+      agents: snap.agents,
       includePrivate: snap.includePrivate,
       topTalkers: snap.topTalkers?.slice(0, 5),
     });
     return true;
+  }
+
+  if (path === "/api/traffic/agents") {
+    const c = getCollector();
+    sendJson(res, 200, { ok: true, agents: c.listAgents() });
+    return true;
+  }
+
+  if (path === "/api/traffic/ingest" && method === "POST") {
+    const c = getCollector();
+    try {
+      const body = await readBody(req);
+      // also accept token header
+      const hdr =
+        req.headers["x-earthlink-token"] ||
+        (String(req.headers.authorization || "").startsWith("Bearer ")
+          ? String(req.headers.authorization).slice(7)
+          : "");
+      if (hdr && !body.token) body.token = hdr;
+      const result = await c.ingestRemote(body);
+      sendJson(res, 200, result);
+      return true;
+    } catch (e) {
+      sendJson(res, e?.status || 400, {
+        ok: false,
+        error: e?.message ?? "ingest failed",
+      });
+      return true;
+    }
   }
 
   if (path === "/api/traffic/settings") {
@@ -96,6 +128,7 @@ export async function handleTrafficApi(req, res, urlPath) {
         ok: true,
         includePrivate: c.getIncludePrivate(),
         mutedIps: c.listMuted(),
+        agents: c.listAgents(),
       });
       return true;
     }

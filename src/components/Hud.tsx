@@ -151,6 +151,7 @@ export function Hud() {
   const replayWindowMs = useConnectionStore((s) => s.replayWindowMs);
   const hostId = useConnectionStore((s) => s.hostId);
   const includePrivate = useConnectionStore((s) => s.includePrivate);
+  const agents = useConnectionStore((s) => s.agents);
   const spinSpeed = useConnectionStore((s) => s.spinSpeed);
 
   const setPaused = useConnectionStore((s) => s.setPaused);
@@ -612,6 +613,32 @@ export function Hud() {
                 : "Only public remotes (default)"}
             </p>
 
+            {agents.length > 0 && (
+              <div className="mt-2 border-t border-border pt-2">
+                <p className="text-[9px] uppercase text-faint">Agents</p>
+                <ul className="mt-1 space-y-0.5">
+                  {agents.slice(0, 5).map((a) => (
+                    <li
+                      key={a.hostId}
+                      className="flex justify-between gap-1 font-mono text-[10px] text-muted"
+                    >
+                      <span className="truncate text-fg">
+                        {a.hostId}
+                        <span className="text-faint">
+                          {" "}
+                          · {a.osLabel || a.os || "?"}
+                        </span>
+                      </span>
+                      <span className={a.stale ? "text-danger" : "text-primary"}>
+                        {a.local ? "hub" : a.stale ? "stale" : a.socketCount ?? 0}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+
             {(enabledMutes > 0 || mutedActiveCount > 0) && (
               <p className="mt-1.5 font-mono text-[10px] text-faint">
                 {enabledMutes} muted
@@ -940,6 +967,10 @@ export function Hud() {
                         <p className="truncate font-mono text-[10px] text-faint">
                           {c.ip}:{c.port} · {c.protocol}
                           {c.process ? ` · ${c.process}` : ""}
+                          {c.hostId && agents.length > 1
+                            ? ` · ${c.hostId}`
+                            : ""}
+                          {c.os ? ` · ${c.os}` : ""}
                         </p>
                         {(c.org || c.bytesPerSec) && (
                           <p className="truncate font-mono text-[10px] text-faint">

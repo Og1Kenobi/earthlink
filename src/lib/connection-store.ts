@@ -51,6 +51,7 @@ export type Connection = {
   httpPath?: string | null;
   httpMethod?: string | null;
   hostId?: string;
+  os?: string;
   transport?: string;
   isPrivate?: boolean;
 };
@@ -118,6 +119,15 @@ export type Home = {
 
 export type TrafficMode = "real" | "demo" | "connecting";
 
+export type AgentInfo = {
+  hostId: string;
+  os?: string;
+  osLabel?: string;
+  local?: boolean;
+  socketCount?: number;
+  stale?: boolean;
+};
+
 export type TopTalker = {
   ip: string;
   city: string;
@@ -153,6 +163,7 @@ type RealRow = {
   bytes?: number;
   bytesPerSec?: number;
   hostId?: string;
+  os?: string;
   transport?: string;
   isPrivate?: boolean;
 };
@@ -203,6 +214,7 @@ type State = {
   replayWindowMs: number;
   trails: TrailPoint[];
   multiHosts: string[];
+  agents: AgentInfo[];
   includePrivate: boolean;
   spinSpeed: SpinSpeed;
   seenCountries: Set<string>;
@@ -224,6 +236,7 @@ type State = {
   setTopTalkers: (t: TopTalker[]) => void;
   setHostId: (id: string | null) => void;
   setIncludePrivate: (on: boolean) => void;
+  setAgents: (a: AgentInfo[]) => void;
   setSpinSpeed: (s: SpinSpeed) => void;
   pushHistoryEvents: (evs: HistoryEvent[]) => void;
   hydrateMutes: () => void;
@@ -388,6 +401,7 @@ export const useConnectionStore = create<State>((set, get) => ({
   trails: [],
   multiHosts: [],
   includePrivate: false,
+  agents: [],
   spinSpeed: typeof window !== "undefined" ? loadSpin() : 1,
   seenCountries: new Set(),
   seenSshSubnets: new Set(),
@@ -423,6 +437,8 @@ export const useConnectionStore = create<State>((set, get) => ({
   setTopTalkers: (topTalkers) => set({ topTalkers }),
   setHostId: (hostId) => set({ hostId }),
   setIncludePrivate: (includePrivate) => set({ includePrivate }),
+  setAgents: (agents) => set({ agents }),
+
   setSpinSpeed: (spinSpeed) => {
     try {
       localStorage.setItem(SPIN_KEY, String(spinSpeed));
@@ -662,6 +678,7 @@ export const useConnectionStore = create<State>((set, get) => ({
             bytes: row.bytes ?? prev.bytes,
             bytesPerSec: row.bytesPerSec ?? prev.bytesPerSec,
             hostId: row.hostId ?? prev.hostId,
+            os: row.os ?? prev.os,
             transport: row.transport ?? prev.transport,
             isPrivate: row.isPrivate ?? prev.isPrivate,
             ttl: row.live
@@ -704,6 +721,7 @@ export const useConnectionStore = create<State>((set, get) => ({
             httpPath: row.httpPath,
             httpMethod: row.httpMethod,
             hostId: row.hostId,
+            os: row.os,
             transport: row.transport,
             isPrivate: row.isPrivate,
           });

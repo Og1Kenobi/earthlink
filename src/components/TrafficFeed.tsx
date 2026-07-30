@@ -6,12 +6,24 @@ import {
   type TopTalker,
 } from "@/lib/connection-store";
 
+type AgentInfo = {
+  hostId: string;
+  os?: string;
+  osLabel?: string;
+  local?: boolean;
+  socketCount?: number;
+  stale?: boolean;
+};
+
 type TrafficSnapshot = {
   ok: boolean;
   mode: string;
   error: string | null;
   hostId?: string;
+  os?: string;
+  osLabel?: string;
   includePrivate?: boolean;
+  agents?: AgentInfo[];
   home: {
     lat: number;
     lon: number;
@@ -46,6 +58,7 @@ type TrafficSnapshot = {
     bytes?: number;
     bytesPerSec?: number;
     hostId?: string;
+    os?: string;
     transport?: string;
     isPrivate?: boolean;
   }>;
@@ -85,6 +98,7 @@ function mapRow(c: TrafficSnapshot["connections"][number]) {
     bytes: c.bytes,
     bytesPerSec: c.bytesPerSec,
     hostId: c.hostId,
+    os: c.os,
     transport: c.transport,
     isPrivate: c.isPrivate,
   };
@@ -106,6 +120,7 @@ export function TrafficFeed() {
   const setTopTalkers = useConnectionStore((s) => s.setTopTalkers);
   const setHostId = useConnectionStore((s) => s.setHostId);
   const setIncludePrivate = useConnectionStore((s) => s.setIncludePrivate);
+  const setAgents = useConnectionStore((s) => s.setAgents);
   const pushHistoryEvents = useConnectionStore((s) => s.pushHistoryEvents);
   const demoTimer = useRef<number | null>(null);
 
@@ -134,6 +149,7 @@ export function TrafficFeed() {
       if (typeof snap.includePrivate === "boolean") {
         setIncludePrivate(snap.includePrivate);
       }
+      if (snap.agents) setAgents(snap.agents);
       setAgentActiveCount(snap.activeCount ?? 0);
       setDirectionCounts(snap.inboundCount ?? 0, snap.outboundCount ?? 0);
       setAgentError(snap.error);
@@ -204,6 +220,7 @@ export function TrafficFeed() {
     setTopTalkers,
     setHostId,
     setIncludePrivate,
+    setAgents,
     pushHistoryEvents,
   ]);
 

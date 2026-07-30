@@ -15,7 +15,11 @@
     "start": "node server/traffic-server.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "agent": "node agents/earthlink-agent.mjs",
+    "agent:linux": "node agents/earthlink-agent.mjs",
+    "agent:macos": "node agents/earthlink-agent.mjs",
+    "agent:windows": "node agents/earthlink-agent.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",
