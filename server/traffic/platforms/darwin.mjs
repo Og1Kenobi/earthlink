@@ -74,7 +74,8 @@ export function parseDarwinNetstat(stdout, transport = "tcp") {
     if (peer.port === 0 && transport !== "udp") continue;
 
     const t = /^udp/i.test(parts[0]) ? "udp" : "tcp";
-    const key = `${t}|${peer.ip}|${peer.port}|${local.ip}|${local.port}`;
+    const key = `${t}|${peer.ip}|${peer.port}`;
+
     if (seen.has(key)) continue;
     seen.add(key);
 
