@@ -53,14 +53,16 @@ export function parseWinNetstat(stdout) {
         if (local?.port) listening.add(local.port);
         continue;
       }
-      if (!/ESTABLISHED|SYN|TIME_WAIT|FIN_WAIT|CLOSE_WAIT|LAST_ACK/i.test(state)) {
+      // Skip short-lived states that flicker each netstat poll
+      if (!/ESTABLISHED|SYN_SENT|SYN_RECV/i.test(state)) {
         continue;
       }
       if (!local || !foreign) continue;
       if (isLoopback(foreign.ip) || isLoopback(local.ip)) continue;
       if (!foreign.ip || foreign.ip === "0.0.0.0" || foreign.ip === "*") continue;
 
-      const key = `tcp|${foreign.ip}|${foreign.port}|${local.ip}|${local.port}`;
+      // Sticky peer key (no local port) — one arc per remote endpoint
+      const key = `tcp|${foreign.ip}|${foreign.port}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({
@@ -94,9 +96,10 @@ export function parseWinNetstat(stdout) {
         continue;
       }
       if (isLoopback(foreign.ip) || isLoopback(local.ip)) continue;
-      const key = `udp|${foreign.ip}|${foreign.port}|${local.ip}|${local.port}`;
+      const key = `udp|${foreign.ip}|${foreign.port}`;
       if (seen.has(key)) continue;
       seen.add(key);
+
       out.push({
         transport: "udp",
         localIp: local.ip,

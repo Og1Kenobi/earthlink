@@ -61,7 +61,7 @@ function privateGeoNearHome(ip, home) {
 export function createTrafficCollector(options = {}) {
   const pollMs = options.pollMs ?? Number(process.env.EARTHLINK_POLL_MS || 1000);
   const lingerMs =
-    options.lingerMs ?? Number(process.env.EARTHLINK_LINGER_MS || 6000);
+    options.lingerMs ?? Number(process.env.EARTHLINK_LINGER_MS || 9000);
   let includePrivate =
     options.includePrivate ?? process.env.EARTHLINK_INCLUDE_PRIVATE === "1";
   const maxConnections = options.maxConnections ?? 200;
@@ -230,7 +230,12 @@ export function createTrafficCollector(options = {}) {
     const proc = resolveProcess(s, processMap);
     const logHit = hostId === HOST_ID ? accessLog.lookup(s.remoteIp) : null;
     const bytes = Number(s.bytes) || 0;
-    const fullKey = `${hostId}|${s.key}`;
+    // Sticky identity: host + transport + remote IP:port + direction
+    // (ignore ephemeral local ports — they change every browser request)
+    const transport = s.transport || "tcp";
+    const dir = s.direction || "outbound";
+    const sticky = `${transport}|${s.remoteIp}|${s.remotePort || 0}`;
+    const fullKey = `${hostId}|${sticky}|${dir}`;
 
     const existing = active.get(fullKey);
     if (existing) {
@@ -387,8 +392,8 @@ export function createTrafficCollector(options = {}) {
         if (k) seenKeys.add(k);
       }
 
-      // mark local gone only after a few missed polls (avoids arc flicker)
-      const MISS_BEFORE_GONE = 3;
+      // mark local gone only after several missed polls (avoids 1-poll flicker)
+      const MISS_BEFORE_GONE = 6;
       for (const [key, conn] of active) {
         if (conn.hostId !== HOST_ID) continue;
         if (seenKeys.has(key)) continue;
@@ -509,8 +514,8 @@ export function createTrafficCollector(options = {}) {
       if (k) seenKeys.add(k);
     }
 
-    // mark missing remote only after a few missed pushes
-    const MISS_BEFORE_GONE = 2;
+    // mark missing remote only after several missed pushes (~6–8s)
+    const MISS_BEFORE_GONE = 5;
     for (const [key, conn] of active) {
       if (conn.hostId !== hostId) continue;
       if (seenKeys.has(key)) continue;

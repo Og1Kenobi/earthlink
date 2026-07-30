@@ -67,6 +67,7 @@ export type Connection = {
   os?: string;
   transport?: string;
   isPrivate?: boolean;
+  missCount?: number;
 };
 
 export type TrafficEvent = {
@@ -434,6 +435,25 @@ export function protocolWeight(protocol: string, bytesPerSec = 0): number {
   return base;
 }
 
+
+/** Collapse ephemeral local ports / server id churn into one visual peer. */
+function stablePeerId(row: {
+  id: string;
+  ip: string;
+  port: number;
+  direction?: string;
+  hostId?: string;
+  transport?: string;
+}): string {
+  const host =
+    row.hostId || (row.id.includes("|") ? row.id.split("|")[0]! : "local");
+  const transport = row.transport || "tcp";
+  const dir = row.direction || "outbound";
+  const port = row.port || 0;
+  return `${host}|${transport}|${row.ip}|${port}|${dir}`;
+}
+
+
 export const useConnectionStore = create<State>((set, get) => ({
   home: {
     lat: DEFAULT_HOME.lat,
@@ -620,7 +640,6 @@ export const useConnectionStore = create<State>((set, get) => ({
     return true;
   },
 
-
   upsertRealConnections: (rows) => {
     const {
       home,
@@ -642,9 +661,14 @@ export const useConnectionStore = create<State>((set, get) => ({
 
     set((s) => {
       const byId = new Map(s.connections.map((c) => [c.id, c]));
-      const nextIds = new Set(rows.map((r) => r.id));
+      // Map stable peer key → row (last write wins)
+      const stabilized = rows.map((r) => {
+        const sid = stablePeerId(r);
+        return { ...r, id: sid, _rawId: r.id };
+      });
+      const nextIds = new Set(stabilized.map((r) => r.id));
 
-      for (const row of rows) {
+      for (const row of stabilized) {
         const prev = byId.get(row.id);
         const muted = isIpMuted(row.ip, mutedPeers);
         if (prev) {
@@ -687,6 +711,7 @@ export const useConnectionStore = create<State>((set, get) => ({
               : dying
                 ? (row.lingerMs ?? linger)
                 : Math.max(4000, prev.ttl),
+            missCount: 0,
           });
         } else {
           const isNew = !seenRealIds.has(row.id);
@@ -791,17 +816,28 @@ export const useConnectionStore = create<State>((set, get) => ({
         }
       }
 
-      // Vanished from feed without live:false — start soft fade (no hard pop)
+      // Vanished from feed — need several consecutive misses before fade
+      // (1.5s poll × 4 ≈ 6s) so one empty netstat doesn't pop the arc.
+      const MISS_BEFORE_FADE = 4;
       for (const [id, prev] of byId) {
-        if (nextIds.has(id)) continue;
         if (!prev.real) continue;
-        if (prev.live !== false) {
+        if (nextIds.has(id)) {
+          if (prev.missCount) {
+            byId.set(id, { ...prev, missCount: 0 });
+          }
+          continue;
+        }
+        const misses = (prev.missCount || 0) + 1;
+        if (prev.live !== false && misses >= MISS_BEFORE_FADE) {
           byId.set(id, {
             ...prev,
             live: false,
             createdAt: now,
             ttl: linger,
+            missCount: misses,
           });
+        } else if (prev.live !== false) {
+          byId.set(id, { ...prev, missCount: misses });
         }
       }
 

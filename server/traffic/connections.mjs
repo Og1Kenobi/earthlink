@@ -264,13 +264,16 @@ function parseProcTcp(text, ipv6 = false) {
       if (Number.isFinite(localPort)) listeningPorts.add(localPort);
       continue;
     }
-    if (![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x08, 0x09].includes(st)) {
+    // Only show active TCP sessions — TIME_WAIT/FIN_* flicker every poll
+    if (![0x01, 0x02, 0x03].includes(st)) {
+      // 01 ESTABLISHED, 02 SYN_SENT, 03 SYN_RECV
       continue;
     }
     if (!remoteIp || isZeroRemote(remoteIp, remotePort, ipv6)) continue;
     if (isLoopback(remoteIp) || isLoopback(localIp)) continue;
 
-    const key = `tcp|${remoteIp}|${remotePort}|${localIp}|${localPort}`;
+    // Sticky key: ignore local ephemeral port so one peer = one arc
+    const key = `tcp|${remoteIp}|${remotePort}`;
     established.push({
       transport: "tcp",
       localIp,
@@ -312,7 +315,7 @@ function parseProcUdp(text, ipv6 = false) {
     }
     if (isLoopback(remoteIp) || isLoopback(localIp)) continue;
 
-    const key = `udp|${remoteIp}|${remotePort}|${localIp}|${localPort}`;
+    const key = `udp|${remoteIp}|${remotePort}`;
     rows.push({
       transport: "udp",
       localIp,
