@@ -1,0 +1,82 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-bg: #05070d;
+  --color-surface: #0c111c;
+  --color-surface-elevated: #121a2a;
+  --color-fg: #e8eef8;
+  --color-muted: #8b97ad;
+  --color-faint: #5a6578;
+  --color-primary: #2ee6a6;
+  --color-primary-dim: #1a9e72;
+  --color-accent: #4cc9f0;
+  --color-warn: #f0b429;
+  --color-danger: #ff6b6b;
+  --color-border: #1e2a3d;
+  --color-border-strong: #2d3f5c;
+  --color-glow: rgb(46 230 166 / 0.35);
+  --font-sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+  --radius: 0.75rem;
+  --radius-lg: 1rem;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@layer utilities {
+  .panel-glass {
+    background: linear-gradient(
+      160deg,
+      rgb(12 17 28 / 0.88),
+      rgb(8 12 20 / 0.78)
+    );
+    border: 1px solid var(--color-border);
+    backdrop-filter: blur(16px);
+    box-shadow:
+      0 0 0 1px rgb(46 230 166 / 0.04),
+      0 18px 48px rgb(0 0 0 / 0.45);
+  }
+
+  .text-glow {
+    text-shadow: 0 0 18px var(--color-glow);
+  }
+
+  .scanline {
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgb(46 230 166 / 0.03) 50%,
+      transparent 100%
+    );
+    background-size: 100% 4px;
+    pointer-events: none;
+  }
+}

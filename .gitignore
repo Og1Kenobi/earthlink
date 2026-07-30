@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.output/
+.vercel/
+screenshots/
+*.log
+.env
+.env.*
+.DS_Store
+earthlink-server.tgz
+.project_id
+.node_modules.lock
