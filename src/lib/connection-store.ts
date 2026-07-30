@@ -21,8 +21,25 @@ export type TrafficDirection = "inbound" | "outbound";
 
 export type SecurityPreset = "all" | "security" | "web" | "noise-off";
 
-/** 0 = paused, 0.5 slow, 1 normal, 2 fast, 3.5 turbo */
-export type SpinSpeed = 0 | 0.5 | 1 | 2 | 3.5;
+/** Named presets — avoids float/null bugs with localStorage. */
+export type SpinPreset = "off" | "slow" | "med" | "fast" | "turbo";
+
+/** Radians/sec multipliers applied in Earth.tsx */
+export const SPIN_RATES: Record<SpinPreset, number> = {
+  off: 0,
+  slow: 0.35,
+  med: 1,
+  fast: 2.25,
+  turbo: 4.5,
+};
+
+export const SPIN_PRESETS: { id: SpinPreset; label: string }[] = [
+  { id: "off", label: "Off" },
+  { id: "slow", label: "Slow" },
+  { id: "med", label: "Med" },
+  { id: "fast", label: "Fast" },
+  { id: "turbo", label: "Turbo" },
+];
 
 export type Connection = {
   id: string;
@@ -173,16 +190,41 @@ const CDN_ORGS =
 const NOISE_PROTO = /^(DNS|NTP|PING|ICMP|QUIC)$/i;
 const SECURITY_PORTS = new Set([22, 23, 3389, 5900, 445, 21, 3306, 5432, 27017]);
 
-const SPIN_KEY = "earthlink-spin-speed";
+const SPIN_KEY = "earthlink-spin-preset";
+const SPIN_KEY_LEGACY = "earthlink-spin-speed";
 
-function loadSpin(): SpinSpeed {
+function isSpinPreset(v: string): v is SpinPreset {
+  return v === "off" || v === "slow" || v === "med" || v === "fast" || v === "turbo";
+}
+
+function loadSpinPreset(): SpinPreset {
   try {
-    const v = Number(localStorage.getItem(SPIN_KEY));
-    if (v === 0 || v === 0.5 || v === 1 || v === 2 || v === 3.5) return v;
+    if (typeof window === "undefined") return "med";
+    const named = localStorage.getItem(SPIN_KEY);
+    if (named && isSpinPreset(named)) return named;
+
+    // migrate old numeric values (and fix Number(null)===0 trap)
+    const legacyRaw = localStorage.getItem(SPIN_KEY_LEGACY);
+    if (legacyRaw != null && legacyRaw !== "") {
+      const n = Number(legacyRaw);
+      let migrated: SpinPreset = "med";
+      if (n === 0) migrated = "off";
+      else if (n > 0 && n < 0.75) migrated = "slow";
+      else if (n >= 0.75 && n < 1.5) migrated = "med";
+      else if (n >= 1.5 && n < 3) migrated = "fast";
+      else if (n >= 3) migrated = "turbo";
+      try {
+        localStorage.setItem(SPIN_KEY, migrated);
+        localStorage.removeItem(SPIN_KEY_LEGACY);
+      } catch {
+        /* ignore */
+      }
+      return migrated;
+    }
   } catch {
     /* ignore */
   }
-  return 1;
+  return "med";
 }
 
 type State = {
@@ -216,7 +258,7 @@ type State = {
   multiHosts: string[];
   agents: AgentInfo[];
   includePrivate: boolean;
-  spinSpeed: SpinSpeed;
+  spinPreset: SpinPreset;
   seenCountries: Set<string>;
   seenSshSubnets: Set<string>;
   setHome: (home: Partial<Home> & { lat: number; lon: number }) => void;
@@ -237,7 +279,7 @@ type State = {
   setHostId: (id: string | null) => void;
   setIncludePrivate: (on: boolean) => void;
   setAgents: (a: AgentInfo[]) => void;
-  setSpinSpeed: (s: SpinSpeed) => void;
+  setSpinPreset: (p: SpinPreset) => void;
   pushHistoryEvents: (evs: HistoryEvent[]) => void;
   hydrateMutes: () => void;
   muteIp: (ip: string, meta?: { label?: string; note?: string }) => void;
@@ -402,7 +444,7 @@ export const useConnectionStore = create<State>((set, get) => ({
   multiHosts: [],
   includePrivate: false,
   agents: [],
-  spinSpeed: typeof window !== "undefined" ? loadSpin() : 1,
+  spinPreset: "med",
   seenCountries: new Set(),
   seenSshSubnets: new Set(),
 
@@ -438,14 +480,15 @@ export const useConnectionStore = create<State>((set, get) => ({
   setHostId: (hostId) => set({ hostId }),
   setIncludePrivate: (includePrivate) => set({ includePrivate }),
   setAgents: (agents) => set({ agents }),
-
-  setSpinSpeed: (spinSpeed) => {
+  setSpinPreset: (spinPreset) => {
+    if (!isSpinPreset(spinPreset)) return;
     try {
-      localStorage.setItem(SPIN_KEY, String(spinSpeed));
+      localStorage.setItem(SPIN_KEY, spinPreset);
+      localStorage.removeItem(SPIN_KEY_LEGACY);
     } catch {
       /* ignore */
     }
-    set({ spinSpeed });
+    set({ spinPreset });
   },
   pushHistoryEvents: (evs) =>
     set((s) => {
@@ -461,10 +504,11 @@ export const useConnectionStore = create<State>((set, get) => ({
 
   hydrateMutes: () => {
     const loaded = loadMutedPeers();
-    if (!loaded.length) return;
+    const spinPreset = loadSpinPreset();
     set((s) => ({
-      mutedPeers: loaded,
-      ...recount(s.connections, loaded),
+      spinPreset,
+      mutedPeers: loaded.length ? loaded : s.mutedPeers,
+      ...(loaded.length ? recount(s.connections, loaded) : {}),
     }));
   },
 

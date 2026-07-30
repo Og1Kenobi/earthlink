@@ -10,7 +10,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { buildPoliticalTexture } from "@/lib/political-texture";
 import type { GeoJsonFeatureCollection } from "@/lib/sphere-geo";
-import { useConnectionStore } from "@/lib/connection-store";
+import { SPIN_RATES, useConnectionStore } from "@/lib/connection-store";
 
 const EARTH_RADIUS = 2;
 
@@ -80,7 +80,6 @@ function PoliticalGlobe({ children }: { children?: ReactNode }) {
       <mesh material={mat}>
         <sphereGeometry args={[EARTH_RADIUS, 96, 96]} />
       </mesh>
-      {/* Soft limb glow */}
       <mesh scale={1.012}>
         <sphereGeometry args={[EARTH_RADIUS, 64, 64]} />
         <meshBasicMaterial
@@ -97,8 +96,8 @@ function PoliticalGlobe({ children }: { children?: ReactNode }) {
   );
 }
 
-/** Base radians/sec multiplier at spinSpeed = 1 */
-const SPIN_BASE = 0.028;
+/** Base radians/sec at Med (rate = 1) */
+const SPIN_BASE = 0.085;
 
 export function Earth({
   autoRotate = true,
@@ -108,7 +107,10 @@ export function Earth({
   children?: ReactNode;
 }) {
   const group = useRef<THREE.Group>(null);
-  const spinSpeed = useConnectionStore((s) => s.spinSpeed);
+  const spinPreset = useConnectionStore((s) => s.spinPreset);
+  // Ref so useFrame never holds a stale rate (R3F callback can lag a render)
+  const rateRef = useRef(SPIN_RATES[spinPreset] ?? 1);
+  rateRef.current = SPIN_RATES[spinPreset] ?? 1;
 
   useLayoutEffect(() => {
     if (group.current) {
@@ -118,8 +120,11 @@ export function Earth({
   }, []);
 
   useFrame((_, delta) => {
-    if (!autoRotate || !group.current || spinSpeed <= 0) return;
-    group.current.rotation.y += Math.min(delta, 0.05) * SPIN_BASE * spinSpeed;
+    if (!autoRotate || !group.current) return;
+    const rate = rateRef.current;
+    if (rate <= 0) return;
+    const dt = Math.min(Math.max(delta, 0), 0.1);
+    group.current.rotation.y += dt * SPIN_BASE * rate;
   });
 
   return (

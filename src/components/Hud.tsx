@@ -34,7 +34,8 @@ import {
   useConnectionStore,
   type Connection,
   type SecurityPreset,
-  type SpinSpeed,
+  SPIN_PRESETS,
+  type SpinPreset,
 } from "@/lib/connection-store";
 import { refreshHomeLocation } from "@/components/HomeLocator";
 import { resumeFxAudio } from "@/lib/fx-audio";
@@ -152,7 +153,7 @@ export function Hud() {
   const hostId = useConnectionStore((s) => s.hostId);
   const includePrivate = useConnectionStore((s) => s.includePrivate);
   const agents = useConnectionStore((s) => s.agents);
-  const spinSpeed = useConnectionStore((s) => s.spinSpeed);
+  const spinPreset = useConnectionStore((s) => s.spinPreset);
 
   const setPaused = useConnectionStore((s) => s.setPaused);
   const setIntensity = useConnectionStore((s) => s.setIntensity);
@@ -172,7 +173,7 @@ export function Hud() {
   const setAlertsEnabled = useConnectionStore((s) => s.setAlertsEnabled);
   const setReplayMs = useConnectionStore((s) => s.setReplayMs);
   const setIncludePrivate = useConnectionStore((s) => s.setIncludePrivate);
-  const setSpinSpeed = useConnectionStore((s) => s.setSpinSpeed);
+  const setSpinPreset = useConnectionStore((s) => s.setSpinPreset);
   const clearAlerts = useConnectionStore((s) => s.clearAlerts);
 
   const [now, setNow] = useState(() => performance.now());
@@ -401,27 +402,25 @@ export function Hud() {
             </div>
 
             <div className="ml-1 flex items-center gap-0.5 border-l border-border pl-2" role="group" aria-label="Globe spin speed">
-              {([
-                [0, "Off"],
-                [0.5, "Slow"],
-                [1, "Med"],
-                [2, "Fast"],
-                [3.5, "Turbo"],
-              ] as const).map(([spd, label]) => (
-                <button
-                  key={spd}
-                  type="button"
-                  data-tip={`Globe spin: ${label}`}
-                  className={`tip tip-below rounded-md border px-1.5 py-0.5 font-mono text-[9px] uppercase transition ${
-                    spinSpeed === spd
-                      ? "border-accent/50 bg-accent/15 text-accent"
-                      : "border-border bg-surface text-muted hover:border-border-strong"
-                  }`}
-                  onClick={() => setSpinSpeed(spd as SpinSpeed)}
-                >
-                  {label}
-                </button>
-              ))}
+              {SPIN_PRESETS.map((p) => {
+                const active = spinPreset === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    data-tip={`Globe spin: ${p.label}`}
+                    aria-pressed={active}
+                    className={`tip tip-below rounded-md border px-1.5 py-0.5 font-mono text-[9px] uppercase transition ${
+                      active
+                        ? "border-accent/50 bg-accent/15 text-accent"
+                        : "border-border bg-surface text-muted hover:border-border-strong"
+                    }`}
+                    onClick={() => setSpinPreset(p.id as SpinPreset)}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
             </div>
 
           </div>
