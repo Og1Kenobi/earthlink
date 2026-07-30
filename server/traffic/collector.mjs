@@ -1,15 +1,16 @@
-import { readEstablishedTcp, isPrivateIp } from "./connections.mjs";
+import { readAllConnections, isPrivateIp } from "./connections.mjs";
 import { lookupMany, lookupSelf } from "./geoip.mjs";
 
 /**
  * Live traffic collector — polls sockets, geolocates remotes, tracks lifetimes.
- * Tracks both inbound and outbound established TCP.
+ * TCP (+handshake), UDP (DNS/NTP/QUIC…), ICMP/ping when conntrack is on.
  */
 export function createTrafficCollector(options = {}) {
-  const pollMs = options.pollMs ?? 1500;
-  const lingerMs = options.lingerMs ?? 4500;
+  const pollMs = options.pollMs ?? Number(process.env.EARTHLINK_POLL_MS || 1000);
+  const lingerMs =
+    options.lingerMs ?? Number(process.env.EARTHLINK_LINGER_MS || 6000);
   const includePrivate = options.includePrivate ?? false;
-  const maxConnections = options.maxConnections ?? 120;
+  const maxConnections = options.maxConnections ?? 160;
   // inbound | outbound | both
   const directions =
     options.directions ?? process.env.EARTHLINK_DIRECTIONS ?? "both";
@@ -22,6 +23,7 @@ export function createTrafficCollector(options = {}) {
   let running = false;
   let timer = null;
   let polling = false;
+  let lastSources = { tcp: 0, udp: 0, icmp: 0 };
 
   async function ensureHome() {
     if (home) return home;
@@ -66,8 +68,16 @@ export function createTrafficCollector(options = {}) {
     const now = Date.now();
     try {
       await ensureHome();
-      const socks = await readEstablishedTcp();
+      const socks = await readAllConnections();
       lastError = null;
+
+      lastSources = { tcp: 0, udp: 0, icmp: 0 };
+      for (const s of socks) {
+        const t = s.transport || "tcp";
+        if (t === "udp") lastSources.udp += 1;
+        else if (t === "icmp") lastSources.icmp += 1;
+        else lastSources.tcp += 1;
+      }
 
       const candidates = socks.filter((s) => {
         if (!directionAllowed(s.direction)) return false;
@@ -93,7 +103,10 @@ export function createTrafficCollector(options = {}) {
           existing.direction = s.direction;
           existing.servicePort = s.servicePort;
           existing.displayPort = s.displayPort ?? s.servicePort;
+          existing.transport = s.transport || "tcp";
         } else {
+          // DNS / ICMP / UDP are very short-lived — slightly longer linger
+          const transport = s.transport || "tcp";
           active.set(s.key, {
             id: s.key,
             ip: s.remoteIp,
@@ -107,8 +120,9 @@ export function createTrafficCollector(options = {}) {
             remotePort: s.remotePort,
             localPort: s.localPort,
             localIp: s.localIp,
-            direction: s.direction, // inbound | outbound
+            direction: s.direction,
             servicePort: s.servicePort,
+            transport,
             bytes: 0,
             createdAt: now,
             lastSeen: now,
@@ -125,7 +139,12 @@ export function createTrafficCollector(options = {}) {
       }
 
       for (const [key, conn] of active) {
-        if (conn.goneAt != null && now - conn.goneAt > lingerMs) {
+        // Keep DNS/PING on the map a bit longer so you can actually see them
+        const extra =
+          conn.transport === "udp" || conn.transport === "icmp"
+            ? 2500
+            : 0;
+        if (conn.goneAt != null && now - conn.goneAt > lingerMs + extra) {
           active.delete(key);
         }
       }
@@ -154,6 +173,10 @@ export function createTrafficCollector(options = {}) {
     const connections = [...active.values()]
       .map((c) => {
         const live = c.goneAt == null;
+        const linger =
+          c.transport === "udp" || c.transport === "icmp"
+            ? lingerMs + 2500
+            : lingerMs;
         return {
           id: c.id,
           ip: c.ip,
@@ -167,6 +190,7 @@ export function createTrafficCollector(options = {}) {
           remotePort: c.remotePort,
           direction: c.direction || "outbound",
           servicePort: c.servicePort,
+          transport: c.transport || "tcp",
           bytes: c.bytes,
           createdAt: c.createdAt,
           lastSeen: c.lastSeen,
@@ -174,8 +198,8 @@ export function createTrafficCollector(options = {}) {
           live,
           real: true,
           serverNow: now,
-          lingerMs,
-          ttl: live ? 999_999 : lingerMs,
+          lingerMs: linger,
+          ttl: live ? 999_999 : linger,
         };
       })
       .sort((a, b) => b.lastSeen - a.lastSeen);
@@ -197,6 +221,7 @@ export function createTrafficCollector(options = {}) {
       inboundCount,
       outboundCount,
       totalTracked: connections.length,
+      sources: lastSources,
       serverTime: now,
       hostname: process.env.EARTHLINK_HOSTNAME || undefined,
       listenHint: process.env.EARTHLINK_LISTEN || "0.0.0.0:8080",

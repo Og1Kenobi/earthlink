@@ -2,7 +2,7 @@
 /**
  * Earthlink self-host server
  *
- * - /api/traffic*  → real TCP sockets on this host
+ * - /api/traffic*  → real sockets on this host (TCP, UDP/DNS, ICMP/ping)
  * - static assets  → .vercel/output/static (or dist)
  * - everything else → TanStack Start / Nitro SSR handler
  *
@@ -91,7 +91,6 @@ function safeJoin(base, reqPath) {
 function tryServeStatic(req, res) {
   if (!staticRoot) return false;
   const urlPath = (req.url || "/").split("?")[0];
-  // Only serve real files — not SPA fallback (SSR handles HTML)
   let filePath = safeJoin(staticRoot, urlPath);
   if (!filePath) return false;
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
@@ -176,7 +175,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // Static assets (JS/CSS/textures) before SSR
     if (tryServeStatic(req, res)) return;
 
     await serveNitro(req, res);
@@ -197,6 +195,9 @@ server.listen(port, host, () => {
   console.log(`[earthlink] static: ${staticRoot ?? "(none)"}`);
   console.log(`[earthlink] ssr: ${nitroPath ?? "(none — run npm run build)"}`);
   console.log(
-    `[earthlink] sockets via /proc/net/tcp · inbound+outbound · set EARTHLINK_HOME_LAT/LON to pin home`,
+    `[earthlink] capture: TCP + UDP/DNS + ICMP/ping (conntrack) · inbound+outbound`,
+  );
+  console.log(
+    `[earthlink] tip: enable nf_conntrack for DNS/ping — ls /proc/net/nf_conntrack`,
   );
 });
