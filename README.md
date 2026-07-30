@@ -5,26 +5,24 @@
 Self-host on your server: every public TCP / UDP / DNS / ping peer lights up as a pin and arc to your home location, hangs around, then fades. Inbound is green, outbound is amber.
 
 <p align="center">
-  <img src="docs/screenshots/desktop-globe.png" alt="Earthlink desktop — full NOC panels around the globe" width="100%" />
+  <img src="docs/screenshots/desktop-globe.png" alt="Earthlink desktop — NOC globe with live traffic" width="100%" />
 </p>
 
 | Desktop | Mobile |
 | --- | --- |
-| <img src="docs/screenshots/desktop-filtered.png" alt="Earthlink connections panel" /> | <img src="docs/screenshots/mobile.png" alt="Earthlink on mobile" /> |
+| <img src="docs/screenshots/desktop-filtered.png" alt="Earthlink with spin presets and panels" /> | <img src="docs/screenshots/mobile.png" alt="Earthlink on mobile" /> |
 
 ---
 
 ## Layout
 
-Everything stays **visible at once** (no tab-hiding):
-
 | Zone | Content |
 | --- | --- |
-| **Top-left** | Brand, LIVE, sparkline, security presets |
-| **Top-right** | Kiosk · replay · alerts · mute · sound · tools |
-| **Left stack** | Traffic · Top talkers · Alerts · Home · Muted IPs |
+| **Top-left** | Brand, LIVE, sparkline, security presets, **globe spin** (Off → Turbo) |
+| **Top-right** | Kiosk · replay · LAN · alerts · mute · sound · tools (hover tooltips) |
+| **Left stack** | Traffic (+ **Internal IPs** toggle) · Top talkers · Alerts · Home · Muted |
 | **Right** | Full-height **Connections** + filter |
-| **Bottom** | Feed ticker (+ replay scrubber when open) |
+| **Bottom** | Auto-scrolling **feed marquee** (no scrollbar; pause on hover) |
 | **Center-bottom** | Focus card when a connection is selected |
 
 Kiosk mode strips chrome for wall / TV use.
@@ -38,11 +36,15 @@ Kiosk mode strips chrome for wall / TV use.
 - **Process names** — `ss -p` / inode map
 - **ASN / org** on focus + talkers
 - **Bandwidth-weighted arcs** + **heat trails**
-- **Presets** — All · Security · Web · Noise off
+- **Security presets** — All · Security · Web · Noise off
+- **Globe spin presets** — Off · Slow · Med · Fast · Turbo (saved in browser)
+- **Internal / LAN IPs** — toggle under Traffic; private peers plot near home
 - **Mute IPs** — hide DNS forwarders; toggle back on
 - **Replay scrubber** — recent open/close events
 - **Alerts** — new country, SSH from new /24
-- **Top talkers** · **access-log correlate** · **iface filter**
+- **Marquee feed** — auto-scrolls; hover to pause
+- **Tooltips** on toolbar, presets, and controls
+- **Top talkers** · access-log correlate · iface filter
 
 ---
 
@@ -64,6 +66,7 @@ Full install: **[INSTALL.md](./INSTALL.md)**
 
 ```bash
 export EARTHLINK_MUTE_IPS=8.8.8.8,8.8.4.4
+export EARTHLINK_INCLUDE_PRIVATE=1          # start with LAN on
 export EARTHLINK_ACCESS_LOG=/var/log/nginx/access.log
 export EARTHLINK_IFACES=eth0,wg0
 export EARTHLINK_HOST_ID=edge-1
@@ -80,6 +83,19 @@ sudo chmod 440 /etc/sudoers.d/earthlink-conntrack
 
 ---
 
+## Controls (UI)
+
+| Control | What it does |
+| --- | --- |
+| **All / Security / Web / Noise off** | Filter which connection types you care about |
+| **Off · Slow · Med · Fast · Turbo** | How fast the globe rotates |
+| **Internal IPs** (Traffic panel) | Show 10.x / 192.168.x / etc. near home |
+| **LAN** (toolbar) | Same as Internal IPs |
+| **Ban / Muted** | Hide noisy peers (e.g. DNS forwarders) |
+| **Feed** (bottom) | Auto-scrolls; hover to pause |
+
+---
+
 ## API
 
 | Path | Description |
@@ -88,6 +104,7 @@ sudo chmod 440 /etc/sudoers.d/earthlink-conntrack
 | `GET /api/traffic/history` | Replay events |
 | `GET /api/traffic/health` | Health |
 | `GET/POST /api/traffic/mute` | Mute list |
+| `GET/POST /api/traffic/settings` | `{ "includePrivate": true }` |
 | `GET /api/traffic/stream` | SSE |
 
 ---
